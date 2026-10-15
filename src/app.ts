@@ -30,6 +30,11 @@ import { Fireworks } from './toys/fireworks';
 import { ControlConsole } from './toys/console';
 import { WristMenu } from './ui/wrist-menu';
 import { buildSign } from './ui/sign';
+import { inRangeLane } from './world/layout';
+import { TargetRange } from './archery/targets';
+import { ArrowSystem } from './archery/arrows';
+import { Bow } from './archery/bow';
+import { EYES_ONLY_LAYER } from './archery/scope';
 
 const GIANT_SCALE = 8;
 
@@ -39,9 +44,11 @@ export class App {
   /** Player root: tracking space is placed in the world through this. */
   readonly rig = new Group();
   /** The XR camera (child of the rig). */
-  readonly xrCamera = new PerspectiveCamera(70, 1, 0.03, 2000);
+  // Near/far as tight as the scene allows: depth precision at 30-60 m (the targets)
+  // depends on far/near, and the sky is drawn at the far plane anyway.
+  readonly xrCamera = new PerspectiveCamera(70, 1, 0.05, 1500);
   /** Free camera for the desktop preview. */
-  readonly desktopCamera = new PerspectiveCamera(60, 1, 0.05, 2000);
+  readonly desktopCamera = new PerspectiveCamera(60, 1, 0.05, 1500);
   readonly input = new XRInput();
   readonly xr: XRSessionManager;
   readonly stats = new Stats();
@@ -64,6 +71,9 @@ export class App {
   fireworks!: Fireworks;
   console!: ControlConsole;
   wristMenu!: WristMenu;
+  range!: TargetRange;
+  arrows!: ArrowSystem;
+  bow!: Bow;
   readonly ambience = new Ambience();
   private orbit!: OrbitControls;
   private readonly shadowTarget = new Object3D();
@@ -114,7 +124,7 @@ export class App {
     scene.fog = this.tod.fog;
     this.configureShadows();
 
-    this.clouds = new Clouds(quality);
+    this.clouds = new Clouds(quality, inRangeLane);
     scene.add(this.clouds.sea, this.clouds.puffs);
     this.scenery = buildScenery(this.physics, quality);
     scene.add(this.scenery.root);
@@ -128,6 +138,9 @@ export class App {
     this.rig.rotation.y = SPAWN.yaw;
     this.rig.add(this.xrCamera);
     scene.add(this.rig, this.desktopCamera);
+    // The scope lens is drawn for the eyes only, never into the scope's own view.
+    this.xrCamera.layers.enable(EYES_ONLY_LAYER);
+    this.desktopCamera.layers.enable(EYES_ONLY_LAYER);
     this.playArea = new PlayArea(this.rig);
 
     this.fx = new Particles(quality === 'high' ? 6000 : 3000);
@@ -155,12 +168,17 @@ export class App {
       giant: () => this.setGiant(!this.giant),
     });
     this.wristMenu = new WristMenu(this);
+    this.range = new TargetRange(this);
+    this.arrows = new ArrowSystem(this);
+    this.bow = new Bow(this);
     this.physics.beforeStep = () => this.grab.beforeStep();
 
     this.tod.onChange((p) => {
       this.clouds.applyPreset(p);
       this.scenery.crystalMaterial.color.setScalar(p.glow);
       this.toys.setGlow(p.glow);
+      this.range.setGlow(p.glow);
+      this.bow.scope.setLook(p.zenith, p.horizon, p.skySunDir, p.glow);
       this.ambience.setMood(p.night);
     });
 
@@ -181,6 +199,7 @@ export class App {
       audio.setMusic(settings.music);
     };
     this.xr.onEnd = () => {
+      this.bow.cancel();
       this.grab.releaseAll();
       this.input.clear();
       this.locomotion.reset();
@@ -274,10 +293,14 @@ export class App {
       if (this.wristMenu.engaged) busy.add(this.input.right);
       if (this.locomotion.update(dt, busy)) this.updateRig();
       this.console.update(dt, claimed);
+      this.bow.preUpdate(claimed);
       for (const h of claimed) busy.add(h);
       this.grab.update(dt, claimed);
       this.gloves.update(dt, busy);
     }
+    this.bow.update(dt);
+    this.range.update(dt, this.time);
+    this.arrows.update(dt);
     this.brushes.update(this.time);
     this.marimba.update(dt);
     this.fireworks.update(dt);
@@ -301,6 +324,8 @@ export class App {
     this.ambience.update();
     if (!inXR) this.orbit.update();
     audio.updateListener(this.camera);
+    // Last: the bow and the player's head are where they'll be drawn this frame.
+    this.bow.renderScope(this.time);
     this.onFrame?.(dt);
   }
 
@@ -367,6 +392,9 @@ export class App {
       this.physics.respawn(p);
     }
     if (this.console.zeroG) this.console.setZeroG(false);
+    this.bow.dock();
+    this.arrows.clear();
+    this.range.resetScore();
   }
 
   applyQuality(): void {

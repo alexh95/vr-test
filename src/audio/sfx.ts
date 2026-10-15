@@ -262,3 +262,47 @@ export function swell(up: boolean): void {
   tone(v.input, v.t0, 'triangle', f0 * 1.5, 0.3, 0.4, 1.3, f1 * 1.5);
   noiseBurst(v.input, v.t0, 'bandpass', up ? 400 : 2000, 1, 0.3, 0.5, 1.2, up ? 2000 : 400);
 }
+
+// ---- Archery ----
+
+/** Wood creak while drawing a bow; call every few centimetres of draw. */
+export function bowCreak(at: Vector3, tension: number): void {
+  const v = audio.voice({ at, life: 0.09, gain: 0.16 + tension * 0.24 });
+  if (!v) return;
+  const f = 260 + tension * 380;
+  noiseBurst(v.input, v.t0, 'bandpass', f, 9, 0.9, 0.003, 0.05);
+  tone(v.input, v.t0, 'triangle', f * 0.5, 0.25, 0.002, 0.04);
+}
+
+/** String release: a low twang, the pluck, and the limbs thumping forward. */
+export function bowTwang(at: Vector3, power: number): void {
+  const v = audio.voice({ at, life: 0.45, wet: 0.08, gain: 0.35 + power * 0.45 });
+  if (!v) return;
+  tone(v.input, v.t0, 'sine', 92, 1, 0.002, 0.32, 70);
+  tone(v.input, v.t0, 'triangle', 184, 0.45, 0.002, 0.18, 150);
+  noiseBurst(v.input, v.t0, 'lowpass', 2600, 0.8, 0.8, 0.001, 0.035);
+  noiseBurst(v.input, v.t0 + 0.01, 'bandpass', 700, 2, 0.4, 0.002, 0.09);
+}
+
+/** Flight hiss that follows the arrow; returns a position updater. */
+export function arrowWhoosh(at: Vector3, seconds: number): ((p: Vector3) => void) | null {
+  const v = audio.voice({ at, life: seconds + 0.05, gain: 0.22, ref: 2 });
+  if (!v) return null;
+  noiseBurst(v.input, v.t0, 'bandpass', 1400, 1.6, 1, 0.01, seconds, 500);
+  return (p: Vector3) => v.setPosition(p);
+}
+
+/** Arrow into a target face. From far away you hear it late (343 m/s). */
+export function thock(at: Vector3, distance: number, strength = 1): void {
+  const v = audio.voice({ at, life: 0.25, wet: 0.25, gain: 0.75 * strength, ref: 6, delay: distance / 343 });
+  if (!v) return;
+  tone(v.input, v.t0, 'sine', 240, 1, 0.001, 0.12, 150);
+  noiseBurst(v.input, v.t0, 'bandpass', 1300, 1.4, 0.8, 0.001, 0.04);
+}
+
+export function balloonPop(at: Vector3, distance: number): void {
+  const v = audio.voice({ at, life: 0.3, wet: 0.3, gain: 0.85, ref: 6, delay: distance / 343 });
+  if (!v) return;
+  noiseBurst(v.input, v.t0, 'highpass', 1800, 0.7, 1, 0.001, 0.05);
+  tone(v.input, v.t0, 'sine', 140, 0.6, 0.001, 0.07, 60);
+}

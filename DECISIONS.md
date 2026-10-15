@@ -110,7 +110,7 @@ Same philosophy as `game-test`: a mechanical verification ladder the agent can r
 | Tool | What it does |
 |---|---|
 | `?emulate` | Installs **IWER** (Meta's WebXR emulation runtime) shaped like the Frame as Chrome sees it (Touch profile, 72–144 Hz, floor space). Any desktop browser can "enter VR" |
-| `?emulate&selftest` | **21 scripted playtest checks**: grab and throw, teleport (and refusing the abyss), snap and smooth turn, walking, gravity gloves, painting, marimba by finger and by thrown ball, fireworks from the hand, console buttons (ray and poke), the gravity lever (things float), wrist menu (ray and poke), giant mode, tracked hands, and no frame errors. One JSON line per check. Runs against the dev server and the production build |
+| `?emulate&selftest` | **27 scripted playtest checks** (21 at first, 6 archery since): grab and throw, teleport (and refusing the abyss), snap and smooth turn, walking, gravity gloves, painting, marimba by finger and by thrown ball, fireworks from the hand, console buttons (ray and poke), the gravity lever (things float), wrist menu (ray and poke), giant mode, tracked hands, and no frame errors. One JSON line per check. Runs against the dev server and the production build |
 | `window.__vr` | Probe: `state()`, `events()`, `prop(id)`, `snapshot(name)` |
 | `window.__driver` | Moves the emulated head and controllers in **world** coordinates, presses buttons, sweeps hands along paths at real frame rate |
 | `__vr.snapshot()` | Renders the player's view offscreen and posts it to the dev server → `.snapshots/<name>.png` (works while the page is hidden) |
@@ -121,6 +121,52 @@ Bugs this loop caught before any human looked: a canvas sized 0×0 by the emulat
 
 **Not testable here:** real SteamVR + Chrome, the Frame's actual touch/haptics reporting, comfort and feel. Those need you (see the first-run checklist in the README).
 
-## 13. Deliberately out of scope (for now)
+## 13. Archery: a two-handed bow and a realistic 2× scope (added 2026-10-16)
+
+**The bow.**
+- **Either hand holds it, and that hand aims**: the bow follows the controller's *aim* frame (not the grip
+  frame), so a natural "pointing" hold keeps it upright with the arrow forward on any controller.
+- **The other hand draws.** Bring it to the string and squeeze (grip *or* trigger: people differ) and an arrow
+  nocks. While you draw, the bow rotates to point **from the draw hand through the grip**, keeping the bow
+  hand's roll. That's what makes it two-armed: the line between your hands is the shot, as in real archery,
+  instead of the arrow following one controller.
+- Draw length is measured along that line. Speed is `75 m/s × (draw/max)^0.9`, arrows have gravity and light
+  drag, and limbs bend and the string snaps back with a decaying buzz. Haptics: creaks as tension builds, strain
+  pulses at full draw, a thump in the bow hand on release.
+- Considered: a quiver you reach over your shoulder for. That's realistic but slow to play; auto-nocking when the
+  hand reaches the string is the convention of the best VR archery (The Lab's Longbow).
+
+**The scope** (the "bodycam-style" realism you asked for).
+- **Picture-in-picture, not a zoomed camera.** A second camera at the lens renders a narrow view into a small
+  HDR texture once per frame (mono, 512², about the cost of one extra scene pass while the bow is held). The
+  rest of the world stays 1×, and only the glass shows 2×.
+- **The image lives at infinity.** The lens shader looks up the picture by each eye's *view direction*, not by
+  position on the glass. So it doesn't swim when you move your head, and in VR each eye gets its own correct
+  view. Sampling by position would look like a flat sticker.
+- **Parallax-free red dot.** The dot is drawn on the optical axis in the same direction space, so wherever your
+  eye is, it covers the point the scope is aimed at. It's composited *after* tone mapping so it stays a
+  saturated red; an HDR red through ACES blooms to white (caught in a snapshot).
+- **Scope shadow from real optics, not a texture.** Light must pass two apertures (the rear lens and the front
+  of the tube). When your eye drifts off-axis the front aperture clips the view into the classic dark
+  crescent, and once your eye leaves the lens's eye box the dot vanishes. Snapshots verify all three cases.
+- **Lens imperfections:** chromatic aberration and barrel distortion growing toward the rim, natural vignetting,
+  coating tint, dust and smudges fixed to the glass, Fresnel reflection of the actual sky, a sun glint, a sliding
+  coating sheen, and a bright edge ring.
+- **Zeroed at 35 m**: the scope axis is tilted 1.9° down from the arrow line, computed from the arrow's speed
+  and the 7.7 cm sight height, so the full-draw trajectory crosses the dot at 35 m. The self-test shoots with
+  the dot on a point 35 m away and measures the arrow 5 cm from it.
+- Considered: a rifle-style scope with a short eye relief. That's wrong for a bow, which you hold at arm's
+  length; archery scopes are long-eye-relief lenses on the riser, which is what this models.
+- The lens is on its own render layer (`EYES_ONLY_LAYER`), so the scope camera never renders the lens it's
+  drawing into (no feedback loop). The riser body sits beside a **sight window**: the first version blocked
+  part of the lens from one eye, which a snapshot caught.
+
+**Targets.** Hits are tested **analytically** (segment against disc, segment against sphere), so moving targets
+need no physics bodies, and the world is a Rapier ray cast. The tip's path is checked every frame, so a 75 m/s
+arrow can't tunnel. Arrows parent to whatever they stick in, so they ride the moving targets. Sky-themed:
+bullseyes on floating rocks, a balloon-carried target, one riding an orbiting cloud, and a kite, with
+sun-to-twilight ring colours.
+
+## 14. Deliberately out of scope (for now)
 
 Multiplayer, passthrough / `immersive-ar` (the Frame's passthrough is monochrome and not exposed to WebXR), WebXR Layers (not supported by the community Frame build), eye tracking (not in WebXR), asset pipelines, and saving paintings.

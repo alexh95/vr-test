@@ -83,7 +83,8 @@ export class Clouds {
   private readonly s = new Vector3();
   private readonly p = new Vector3();
 
-  constructor(quality: 'high' | 'low') {
+  /** `avoid(x, y, z)` keeps cluster centres out of a region (the archery lane). */
+  constructor(quality: 'high' | 'low', avoid: (x: number, y: number, z: number) => boolean = () => false) {
     this.seaUniforms.uOctaves.value = quality === 'high' ? 5 : 3;
     const seaMat = new ShaderMaterial({
       vertexShader: seaVertex,
@@ -111,6 +112,9 @@ export class Clouds {
       const dist = 26 + r() * 120;
       const center = new Vector3(Math.cos(ang) * dist, -30 + r() * 34, Math.sin(ang) * dist);
       const size = 2.5 + r() * 5 * (dist / 80);
+      if (avoid(center.x, center.y + size, center.z)) {
+        center.y -= 24; // drop it below the lane instead of removing it
+      }
       for (let k = 0; k < perCluster; k++) {
         const off = new Vector3((r() - 0.5) * size * 2.2, (r() - 0.3) * size * 0.5, (r() - 0.5) * size * 1.2);
         const s = size * (0.45 + r() * 0.55);

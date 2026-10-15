@@ -3,7 +3,8 @@
 A floating island above a sea of clouds at sunset. Everything on it is there because it's better in VR than on a
 screen: grab and throw physics toys, **pull things to your hand with gravity gloves**, paint ribbons of light in
 the air, play a marimba, light a firework in your hand and hear the boom arrive late, flip gravity off, grow to
-giant size, and walk the plank over a 40 m drop.
+giant size, walk the plank over a 40 m drop, and **shoot a two-handed bow with a 2Ã— scope** at targets floating
+(and flying) out over the clouds.
 
 WebXR + three.js + Rapier, TypeScript, Vite. No assets: geometry, textures and sound are all generated in code.
 See [DECISIONS.md](DECISIONS.md) for why each piece was chosen.
@@ -62,6 +63,10 @@ The page switches to the **low** quality preset automatically when it detects a 
 | ![Night: aurora, moon and glowing crystals](docs/night.jpg) | ![The island from above](docs/overview.jpg) |
 | ![Console, light brushes, marimba, fireworks](docs/stations.jpg) | ![Gloved hands driven by trigger, grip and thumb touch, both sides](docs/hands.jpg) |
 
+![Sky Range: the deck, the bow at full draw, and the scope aligned, 2 cm off-axis and 4 cm off-axis](docs/archery.jpg)
+
+![The Sky Range at night](docs/range-night.jpg)
+
 (Rendered from the emulated headset with `__vr.snapshot()`.)
 
 ## Controls
@@ -75,6 +80,7 @@ The page switches to the **low** quality preset automatically when it detects a 
 | **Right stick left/right** | Snap turn (45° by default) |
 | **Left stick** | Walk (with a comfort vignette) |
 | **B / Y** while holding a brush | Undo the last stroke |
+| **Bow**: grip it with one hand, then bring the other hand to the string and squeeze (grip or trigger) | An arrow nocks. Draw back toward your cheek and let go to shoot |
 | **Turn your left palm toward your face** | Wrist menu: poke it with your right index finger (lift it off the trigger to point) or point and pull the trigger |
 
 ### Things to try
@@ -89,6 +95,25 @@ The page switches to the **low** quality preset automatically when it detects a 
   GIANT (grow 8×, press again to shrink) · **GRAVITY lever** (pull it toward you).
 - **The plank**: straight ahead from where you start. Walk out to the end and look down.
 - **Stepping stones** to the satellite island: teleport from stone to stone.
+- **Sky Range** (the deck on the west rim, to your left from spawn): see below.
+
+### Sky Range (archery)
+Take the bow from its rack. Either hand can hold it; that hand aims. Bring your other hand to the string,
+squeeze (grip or trigger), and draw back toward your face. While you draw, the bow points from your draw hand
+through the grip, so **both arms set the aim** as in real archery. Let go to shoot. A full draw sends the arrow
+at about 75 m/s. Arrows drop, so far targets need holdover.
+
+- **The scope** is a 2Ã— archery sight with an illuminated red dot, **zeroed at 35 m** at full draw. Closer
+  targets hit a little high, farther ones low. It behaves like real optics: the picture sits at infinity, the dot
+  stays on target wherever your eye is, and if your eye drifts off the scope's axis, a dark crescent of tube
+  shadow creeps in until the view (and the dot) disappears. Anchor consistently and it lines up.
+- **Targets**: floating rocks at 12, 24 and 45 m, one standing on the west isle, a target **carried by
+  balloons** sailing side to side, one riding a **cloud that orbits a crystal pylon**, and a **kite** looping a
+  figure-eight about 60 m out. Rings score 10/8/6/4/2. Moving targets score Ã—2, the kite Ã—3.
+  **Balloons** drifting up from the clouds pop for 5.
+- Hits are heard late from far away (sound at 343 m/s). Arrows stay stuck in what they hit, moving targets
+  included, and knock props flying (try the tin cans). The scoreboard keeps your best score.
+- RESET on the console puts the bow back and starts a new round. Let go of the bow near its rack and it docks.
 
 ### Wrist menu
 **Settings**: turning (snap 45° / snap 30° / smooth), left stick (walk / teleport), vignette, quality, music,
@@ -114,6 +139,9 @@ first session, check these and note anything that's off:
 - [ ] Teleport and snap turn feel right; smooth walking plus the vignette is comfortable.
 - [ ] Frame rate stays at the headset's refresh rate (Info page). Try the FINALE at night for the worst case.
 - [ ] The play-area outline (SteamVR chaperone) shows on the floor, if SteamVR exposes `bounded-floor`.
+- [ ] **Bow**: nocking with the other hand is easy, the draw feels right, and the arrow flies where the bow points.
+      Does the scope's red dot appear when you anchor? (If your eye can't find it, tell me roughly where your
+      draw hand anchors and I'll move the sight.)
 
 ---
 
@@ -123,7 +151,7 @@ first session, check these and note anything that's off:
 |---|---|
 | `/?emulate` | An emulated headset ([IWER](https://github.com/meta-quest/immersive-web-emulation-runtime), shaped like the Frame as Chrome sees it). Press Enter VR in any browser |
 | `/?emulate&devui` | The same, plus IWER's DevUI to drive the head and controllers with mouse and keyboard |
-| `/?emulate&selftest` | Runs the **21-check scripted playtest** and logs one JSON line per check (`[selftest] {...}`). Results are also in `window.__selftest` |
+| `/?emulate&selftest` | Runs the **27-check scripted playtest** and logs one JSON line per check (`[selftest] {...}`). Results are also in `window.__selftest` |
 | `/?emulate&selftest=teleport,gravity-gloves` | Only those checks |
 | `/?emulate&autostart` | Enters the emulated session on load |
 
@@ -171,6 +199,7 @@ src/
   physics/           Rapier wrapper: fixed step, interpolation, impact events, respawn, zero-G
   interact/          grab/throw/swat, gravity gloves, locomotion (teleport, turn, walk, vignette)
   toys/              table & cans & orbs, light brushes, marimba, fireworks, control console
+  archery/           bow (two-handed draw), scope (picture-in-picture lens shader), arrows, Sky Range targets
   world/             sky, time of day, clouds, islands, scenery, fireflies, play area, layout
   audio/             Web Audio engine, synthesized SFX, ambience + generative pad
   fx/particles.ts    one-draw-call particle system
@@ -181,9 +210,13 @@ tools/contact-sheet.py
 
 ## Status
 
-**Verified** (Chromium in an emulated headset, dev server and production build): all 21 self-test checks pass,
+**Verified** (Chromium in an emulated headset, dev server and production build): all 27 self-test checks pass,
 there are no frame errors, and the visuals were reviewed from snapshots of every station, the hands in four poses
-(both sides), sunset and night, fireworks and the teleport arc. Also checked: the HTTPS mode serves correctly.
+(both sides), sunset and night, fireworks, the teleport arc, the bow at rest and at full draw, and the scope from
+aligned and off-axis eye positions. The archery checks include a ballistic one: with the red dot on a point 35 m
+away, the arrow lands within 5 cm of it. Also checked: the HTTPS mode serves correctly.
+
+**Tested by you on a Steam Frame** (PC streaming): the first version (everything before the Sky Range).
 
 **Not verified:** anything on real hardware, meaning a real SteamVR + Chrome session, the Frame's actual
 haptics/touch/joint reporting, the standalone community browser, comfort and feel. That's the checklist above.

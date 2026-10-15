@@ -197,10 +197,14 @@ export class HandModel {
     // Thumb: its own frame, blended between lifted and resting.
     const tUp = mirror(THUMB_UP_DIR).normalize();
     const tDown = mirror(THUMB_DOWN_DIR).normalize();
-    const thumbAxis = (d: Vector3) => new Vector3().crossVectors(d, palmNormal).normalize();
+    // The thumb is opposable: it doesn't fold toward the palm like a finger, it swings
+    // *across* it toward the pinky side (+Z) and a little into it, so its tip meets the
+    // fingers. Its flex axis is chosen so positive flex moves the tip that way.
+    const opposeToward = new Vector3(0, 0.12, 0.86).addScaledVector(palmNormal, 0.5).normalize();
+    const thumbAxis = (d: Vector3) => new Vector3().crossVectors(d, opposeToward).normalize();
     frameQuat(tUp, thumbAxis(tUp), this.thumbUp);
     frameQuat(tDown, thumbAxis(tDown), this.thumbDownQ);
-    chains.thumb = buildChain('thumb', mirror(THUMB_BASE), tUp, thumbAxis(tUp), THUMB_LENGTHS, THUMB_RADIUS, [25 * DEG, 50 * DEG, 65 * DEG], [5 * DEG, 8 * DEG, 10 * DEG]);
+    chains.thumb = buildChain('thumb', mirror(THUMB_BASE), tUp, thumbAxis(tUp), THUMB_LENGTHS, THUMB_RADIUS, [30 * DEG, 45 * DEG, 70 * DEG], [5 * DEG, 8 * DEG, 10 * DEG]);
     this.chains = chains;
 
     // Both hands are built from proper rotations (no negative scale), so the

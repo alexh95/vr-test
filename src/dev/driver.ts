@@ -70,6 +70,16 @@ export function createDriver(app: App, emu: Emu) {
       aim.decompose(p, q, new Vector3());
       d.setAimWorld(side, p, q);
     },
+    /**
+     * Place a hand so its string-pinch point (grip + 3 cm along the aim ray, see Bow)
+     * lands on `pinch`, with the controller's aim frame at `aimQuat`.
+     */
+    setPinchWorld(side: Side, pinch: Vector3, aimQuat: Quaternion) {
+      const offT = new Vector3().setFromMatrixPosition(gripOffset[side]);
+      const aimFwd = new Vector3(0, 0, -1).applyQuaternion(aimQuat);
+      const gripPos = pinch.clone().addScaledVector(aimFwd, -0.03);
+      d.setAimWorld(side, gripPos.sub(offT.applyQuaternion(aimQuat)), aimQuat);
+    },
     setHeadWorld(pos: Vector3, yawDeg = 0, pitchDeg = 0) {
       const q = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yawDeg * DEG).multiply(new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), pitchDeg * DEG));
       const m = new Matrix4().compose(pos, q, new Vector3(1, 1, 1)).premultiply(d.rigInv());

@@ -27,7 +27,12 @@ export type EventName =
   | 'menu'
   | 'setting'
   | 'respawn'
-  | 'impact';
+  | 'impact'
+  | 'bow-nock'
+  | 'arrow-shot'
+  | 'arrow-hit'
+  | 'target-hit'
+  | 'balloon-pop';
 
 export interface BusEvent {
   name: EventName;

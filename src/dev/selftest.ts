@@ -26,6 +26,57 @@ const expect = (cond: boolean, msg: string) => {
   if (!cond) throw new Error(msg);
 };
 
+
+// ---- archery helpers ----
+const DECK_EYE = new Vector3(-6.5, 1.75, -0.5);
+
+async function standOnDeck(d: Driver): Promise<void> {
+  d.app.rig.position.set(DECK_EYE.x, 0.16, DECK_EYE.z);
+  d.app.rig.rotation.y = 0;
+  d.app.updateRig();
+  d.setHeadWorld(DECK_EYE.clone(), 90, 0); // facing west, down the range
+  await d.frames(3);
+}
+
+async function takeBow(d: Driver): Promise<void> {
+  const bow = d.app.bow.prop;
+  d.setGripWorld('left', bow.object.position.clone(), bow.object.quaternion.clone());
+  await d.frames(4);
+  d.press('left', 'squeeze', 1);
+  await d.frames(4);
+  expect(d.app.grab.held(d.app.input.left) === bow, 'bow not in the left hand');
+}
+
+/** Hold the bow out toward `aim`, grab the string with the right hand and draw `draw` m along `arrowDir`. */
+async function drawBow(d: Driver, aim: Vector3, draw: number, arrowDir?: Vector3): Promise<void> {
+  const head = d.head();
+  const bowAim = head.clone().addScaledVector(aim.clone().sub(head).normalize(), 0.66).add(new Vector3(0, -0.15, 0));
+  d.setAimWorld('left', bowAim, d.lookQuat(bowAim, aim));
+  await d.seconds(0.25);
+  const rest = d.app.bow.restWorld(new Vector3());
+  const fwd = arrowDir ? arrowDir.clone().normalize() : aim.clone().sub(rest).normalize();
+  const q = d.lookQuat(new Vector3(), fwd);
+  d.setPinchWorld('right', rest.clone().addScaledVector(fwd, -0.145), q);
+  await d.frames(5);
+  d.press('right', 'squeeze', 1);
+  await d.frames(3);
+  expect(!!d.app.bow.drawHand, 'the string was not grabbed');
+  const t0 = performance.now();
+  for (;;) {
+    const k = Math.min(1, (performance.now() - t0) / 450);
+    d.setPinchWorld('right', rest.clone().addScaledVector(fwd, -(0.145 + draw * k)), q);
+    if (k >= 1) break;
+    await d.frames(1);
+  }
+  await d.seconds(0.25);
+}
+
+/** Fire a pooled arrow straight from `from` toward `to` (bypassing the bow). */
+function shootDirect(d: Driver, from: Vector3, to: Vector3, speed: number): void {
+  const a = d.app.arrows.nock();
+  d.app.arrows.fire(a, from, to.clone().sub(from).normalize(), speed);
+}
+
 const CHECKS: Check[] = [
   [
     'session',
@@ -381,6 +432,134 @@ const CHECKS: Check[] = [
       d.press('right', 'squeeze', 0);
       expect(lift > 0.05, `ball didn't float (lift ${lift.toFixed(3)} m)`);
       return { toggles: d.count('lever'), floatLift: +lift.toFixed(2) };
+    },
+  ],
+  [
+    'bow-draw-and-hit',
+    async (d) => {
+      await standOnDeck(d);
+      await takeBow(d);
+      const near = d.app.range.targets.find((t) => t.id === 'near')!;
+      const hits = d.count('target-hit');
+      const renders = d.app.bow.scope.renders;
+      await drawBow(d, near.group.position.clone(), 0.6);
+      expect(d.app.bow.draw > 0.55, `draw only ${d.app.bow.draw.toFixed(2)} m`);
+      expect(d.app.bow.scope.renders > renders + 5, 'scope view is not being rendered');
+      d.press('right', 'squeeze', 0);
+      await d.frames(2);
+      const shot = d.last('arrow-shot') as { speed: number };
+      expect(!!shot && shot.speed > 65, `arrow speed ${shot?.speed}`);
+      await d.waitFor(() => d.count('target-hit') > hits, 2, 'the arrow to hit the 12 m target');
+      const hit = d.last('target-hit') as { id: string; points: number };
+      expect(hit.id === 'near', `hit ${hit.id}`);
+      const stuck = d.app.arrows.arrows.some((a) => a.state === 'stuck' && a.mesh.parent === near.group);
+      expect(stuck, 'arrow did not stick in the target');
+      return { speed: shot.speed, points: hit.points };
+    },
+  ],
+  [
+    'scope-zeroed-35m',
+    async (d) => {
+      // Put the red dot on a point 35 m away; the full-draw arrow should land within a hand's width of it.
+      await standOnDeck(d);
+      await takeBow(d);
+      const P = new Vector3(-41.3, 1.2, -0.9);
+      // First draw: aim the arrow straight at P, then see where the scope axis points and correct by that error.
+      await drawBow(d, P, 0.62);
+      const S = d.app.bow.scope.lens.getWorldPosition(new Vector3());
+      const axis = d.app.bow.scope.axis(new Vector3());
+      const want = P.clone().sub(S).normalize();
+      const shotDir = new Vector3(0, 0, -1).transformDirection(d.app.bow.group.matrixWorld);
+      const newDir = shotDir.clone().applyQuaternion(new Quaternion().setFromUnitVectors(axis, want));
+      // Let down without shooting (tiny draw), then draw again with the dot on P.
+      d.setPinchWorld('right', d.app.bow.restWorld(new Vector3()).addScaledVector(shotDir, -0.16), d.lookQuat(new Vector3(), shotDir));
+      await d.frames(3);
+      d.press('right', 'squeeze', 0);
+      await d.seconds(0.3);
+      await drawBow(d, P, 0.62, newDir);
+      const axis2 = d.app.bow.scope.axis(new Vector3());
+      const S2 = d.app.bow.scope.lens.getWorldPosition(new Vector3());
+      const aimErr = (axis2.angleTo(P.clone().sub(S2).normalize()) * 180) / Math.PI;
+      // Follow the arrow through the vertical plane at P.
+      const planeN = P.clone().sub(S2).setY(0).normalize();
+      let crossing: Vector3 | null = null;
+      let prev: Vector3 | null = null;
+      d.press('right', 'squeeze', 0);
+      const t0 = performance.now();
+      while (!crossing && performance.now() - t0 < 2500) {
+        await d.frames(1);
+        const a = d.app.arrows.arrows.find((x) => x.state === 'flying');
+        if (!a) continue;
+        const tip = a.pos.clone().addScaledVector(a.vel.clone().normalize(), 0.8);
+        const side = tip.clone().sub(P).dot(planeN);
+        if (prev && side >= 0) {
+          const ps = prev.clone().sub(P).dot(planeN);
+          crossing = prev.clone().lerp(tip, -ps / (side - ps));
+        }
+        prev = tip;
+      }
+      expect(!!crossing, 'arrow never reached 35 m');
+      const miss = crossing!.clone().sub(P);
+      const vertical = miss.y;
+      const lateral = Math.hypot(miss.x, miss.z);
+      expect(Math.abs(vertical) < 0.25 && lateral < 0.25, `landed ${vertical.toFixed(2)} m vertical, ${lateral.toFixed(2)} m lateral from the dot (aim error ${aimErr.toFixed(2)} deg)`);
+      return { verticalMiss: +vertical.toFixed(3), lateralMiss: +lateral.toFixed(3), aimErrDeg: +aimErr.toFixed(2) };
+    },
+  ],
+  [
+    'moving-targets-move',
+    async (d) => {
+      const movers = d.app.range.targets.filter((t) => t.moving);
+      const before = movers.map((t) => t.group.position.clone());
+      await d.seconds(0.6);
+      const moved = movers.map((t, i) => +t.group.position.distanceTo(before[i]).toFixed(2));
+      expect(movers.length >= 3 && moved.every((m) => m > 0.05), `moved ${JSON.stringify(moved)}`);
+      return { moved: Object.fromEntries(movers.map((t, i) => [t.id, moved[i]])) };
+    },
+  ],
+  [
+    'balloon-pop',
+    async (d) => {
+      const b = d.app.range.balloons.find((x) => x.alive && x.pos.y > -2 && x.pos.y < 12);
+      expect(!!b, 'no balloon in reach');
+      const from = DECK_EYE.clone();
+      const speed = 60;
+      const dist = b!.pos.distanceTo(from);
+      const t = dist / speed;
+      // Lead the rising balloon and hold over for the drop.
+      const aim = b!.pos.clone().add(new Vector3(0, b!.speed * t + 0.5 * 9.81 * t * t, 0));
+      const pops = d.count('balloon-pop');
+      shootDirect(d, from, aim, speed);
+      await d.waitFor(() => d.count('balloon-pop') > pops, 2, 'the balloon to pop');
+      return { distance: +dist.toFixed(1) };
+    },
+  ],
+  [
+    'arrow-knocks-can',
+    async (d) => {
+      const can = d.app.physics.props.find((p) => p.id === 'can-9')!; // the top of the pyramid
+      const start = can.object.position.clone();
+      shootDirect(d, start.clone().add(new Vector3(0.3, 0.05, 4.0)), start, 55);
+      await d.seconds(1.0);
+      const moved = can.object.position.distanceTo(start);
+      expect(moved > 0.3, `can moved ${moved.toFixed(2)} m`);
+      return { moved: +moved.toFixed(2) };
+    },
+  ],
+  [
+    'bow-docks-on-rack',
+    async (d) => {
+      await standOnDeck(d);
+      await takeBow(d);
+      const rack = d.app.range.rackPos.clone();
+      d.setGripWorld('left', rack.clone().add(new Vector3(0.1, 0.05, 0)), d.app.range.rackQuat.clone());
+      await d.frames(4);
+      d.press('left', 'squeeze', 0);
+      await d.seconds(0.5);
+      const p = d.app.bow.prop;
+      const dist = p.object.position.distanceTo(rack);
+      expect(!p.heldBy && dist < 0.01, `bow is ${dist.toFixed(2)} m from the rack`);
+      return { dist: +dist.toFixed(3) };
     },
   ],
   [

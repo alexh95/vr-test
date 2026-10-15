@@ -21,6 +21,8 @@ export interface PropBehavior {
   onRelease?(hand: HandInput): void;
   /** Gravity gloves launched it toward a hand. */
   onPull?(): void;
+  /** Full control of the held pose (world). Return true to use it instead of grip × offset. */
+  poseOverride?(hand: HandInput, outPos: Vector3, outQuat: Quaternion): boolean;
   /** Called every frame while held, after the object has been placed. */
   whileHeld?(hand: HandInput, dt: number): void;
 }

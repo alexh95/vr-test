@@ -17,7 +17,7 @@ import {
 import { RAPIER, type Physics } from '../physics/physics';
 import { rng, TAU } from '../core/math';
 import { buildIsland, type Island, type IslandSpec } from './island';
-import { nearStation } from './layout';
+import { inRangeLane, nearStation } from './layout';
 import { mergeStatic } from '../core/merge';
 
 export interface Scenery {
@@ -126,7 +126,11 @@ export function buildScenery(physics: Physics, quality: 'high' | 'low'): Scenery
   // Keep the play space clear: nothing within ~5.6 m of the island centre, and leave the plank lane open.
   // Keep the sunset side (-Z) open: it's the view, and trees there would shade the play area.
   const mainAvoid = (x: number, z: number) =>
-    Math.hypot(x, z) < 5.6 || (z < -2.5 && Math.abs(x) < 6.5) || (x > 3 && z < -3 && Math.abs(x + z) < 2.4) || nearStation(x, z, 2.0);
+    Math.hypot(x, z) < 5.6 ||
+    (z < -2.5 && Math.abs(x) < 6.5) ||
+    (x > 3 && z < -3 && Math.abs(x + z) < 2.4) ||
+    nearStation(x, z, 2.0) ||
+    inRangeLane(x, 1, z);
   placeOnIsland(main, 9, 0.66, 0.9, mainAvoid);
   placeOnIsland(islands.find((i) => i.spec.name === 'satellite')!, 3, 0.3, 0.75, () => false);
   placeOnIsland(islands.find((i) => i.spec.name === 'west-isle')!, 5, 0.1, 0.8, () => false);

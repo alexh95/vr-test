@@ -159,6 +159,12 @@ export class GrabSystem {
 
   private computeTarget(hand: HandInput, s: HeldState, dt: number): void {
     const p = s.prop!;
+    if (p.behavior.poseOverride?.(hand, s.targetPos, s.targetQuat)) {
+      s.target.compose(s.targetPos, s.targetQuat, _s);
+      p.object.position.copy(s.targetPos);
+      p.object.quaternion.copy(s.targetQuat);
+      return;
+    }
     // Free grabs drift toward the palm so objects don't float a few cm off the hand.
     if (!p.behavior.gripOffset && dt > 0) {
       _v.setFromMatrixPosition(s.offset);

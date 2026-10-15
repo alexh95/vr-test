@@ -1,5 +1,6 @@
 import { PerspectiveCamera, SRGBColorSpace, Vector3, WebGLRenderTarget, type Camera } from 'three';
 import type { App } from '../app';
+import { EYES_ONLY_LAYER } from '../archery/scope';
 
 export interface SnapshotOptions {
   width?: number;
@@ -21,7 +22,9 @@ export async function snapshot(app: App, name: string, o: SnapshotOptions = {}):
   const height = o.height ?? 720;
   let cam = o.camera;
   if (!cam) {
-    const pc = new PerspectiveCamera(o.fov ?? 80, width / height, 0.03, 2000);
+    // Same near/far as the player's eyes, so depth precision (z-fighting) matches the headset.
+    const pc = new PerspectiveCamera(o.fov ?? 80, width / height, app.xrCamera.near, app.xrCamera.far);
+    pc.layers.enable(EYES_ONLY_LAYER); // see what the eyes see, including the scope lens
     if (o.from) {
       pc.position.set(...o.from);
       pc.lookAt(new Vector3(...(o.to ?? [0, 1, 0])));
