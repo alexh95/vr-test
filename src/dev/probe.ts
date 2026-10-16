@@ -64,6 +64,12 @@ export function installProbe(app: App, emu: Emu | null): void {
           aboard: app.boat.aboard,
         },
         laser: { level: +app.bow.laser.level.toFixed(2), hit: app.bow.laser.hit.kind, id: app.bow.laser.hit.id, distance: +app.bow.laser.hit.distance.toFixed(1) },
+        flares: {
+          guns: app.flares.guns.map((g) => ({ id: g.prop.id, docked: g.docked, held: g.held?.handedness ?? null, open: g.open, chamber: g.chamber?.id ?? null, spent: g.spent, shots: g.shots })),
+          inAir: app.flares.flights.summary(),
+          smoke: app.flares.smoke.count,
+          spot: Math.round(app.flares.lights.spot.intensity),
+        },
         settings: { ...settings },
         counts: { ...bus.counts },
         errors: app.errors.length,

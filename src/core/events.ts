@@ -37,7 +37,19 @@ export type EventName =
   | 'boat-grab'
   | 'boat-board'
   | 'boat-leave'
-  | 'boat-bump';
+  | 'boat-bump'
+  | 'flare-take'
+  | 'flare-dock'
+  | 'flare-open'
+  | 'flare-close'
+  | 'flare-load'
+  | 'flare-unload'
+  | 'flare-eject'
+  | 'flare-fire'
+  | 'flare-dry'
+  | 'flare-deploy'
+  | 'flare-land'
+  | 'flare-out';
 
 export interface BusEvent {
   name: EventName;

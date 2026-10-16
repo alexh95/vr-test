@@ -412,3 +412,104 @@ export function engineLoop(): EngineLoop | null {
     },
   };
 }
+
+// ---- Signal flares ----
+
+/** A sound that runs until it's stopped (or its time is up), following something around. */
+export interface LoopSound {
+  move(p: Vector3): void;
+  stop(): void;
+}
+
+/** The pistol: a deep thoomp, a crack, and the round hissing away. */
+export function flareShot(at: Vector3): void {
+  const v = audio.voice({ at, life: 1.0, wet: 0.35, gain: 0.85, ref: 3 });
+  if (!v) return;
+  tone(v.input, v.t0, 'sine', 125, 1, 0.003, 0.28, 42);
+  noiseBurst(v.input, v.t0, 'lowpass', 2400, 0.7, 0.9, 0.002, 0.12, 280);
+  noiseBurst(v.input, v.t0 + 0.02, 'bandpass', 1500, 1.1, 0.35, 0.015, 0.6, 520);
+}
+
+/**
+ * A burning flare: sputtering, crackling hiss (or the softer rush of a smoke
+ * canister). Runs for `seconds` unless stopped first.
+ */
+export function flareHiss(at: Vector3, seconds: number, gain = 0.5, smoky = false): LoopSound | null {
+  const v = audio.voice({ at, life: seconds + 0.3, gain, ref: 4 });
+  if (!v) return null;
+  const ctx = audio.ctx!;
+  const src = audio.noiseSource(v.t0, smoky ? 0.6 : 1);
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = smoky ? 900 : 2700;
+  bp.Q.value = 0.6;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, v.t0);
+  g.gain.exponentialRampToValueAtTime(1, v.t0 + 0.15);
+  g.gain.setValueAtTime(1, v.t0 + Math.max(0.2, seconds - 0.6));
+  g.gain.exponentialRampToValueAtTime(0.0001, v.t0 + seconds);
+  // Crackle: a jittery square wave wobbling the level.
+  const lfo = ctx.createOscillator();
+  lfo.type = 'square';
+  lfo.frequency.value = smoky ? 6 : 19;
+  const depth = ctx.createGain();
+  depth.gain.value = smoky ? 0.15 : 0.3;
+  lfo.connect(depth).connect(g.gain);
+  lfo.start(v.t0);
+  lfo.stop(v.t0 + seconds);
+  src.connect(bp).connect(g).connect(v.input);
+  src.stop(v.t0 + seconds + 0.05);
+  let stopped = false;
+  return {
+    move: (p) => v.setPosition(p),
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      const t = ctx.currentTime;
+      v.input.gain.cancelScheduledValues(t);
+      v.input.gain.setTargetAtTime(0, t, 0.08);
+    },
+  };
+}
+
+/** A parachute opening high up: a pop and the flutter of the canopy, heard late. */
+export function chutePop(at: Vector3, distance: number): void {
+  const v = audio.voice({ at, life: 0.6, wet: 0.35, gain: 0.7, ref: 10, delay: distance / 343 });
+  if (!v) return;
+  noiseBurst(v.input, v.t0, 'bandpass', 700, 1.5, 1, 0.003, 0.08);
+  tone(v.input, v.t0, 'sine', 110, 0.6, 0.002, 0.12, 60);
+  noiseBurst(v.input, v.t0 + 0.04, 'bandpass', 1400, 2.5, 0.4, 0.02, 0.35, 500);
+}
+
+/** A smoke charge bursting: a muffled thump and a rush. */
+export function smokePop(at: Vector3, distance: number): void {
+  const v = audio.voice({ at, life: 0.9, wet: 0.35, gain: 0.7, ref: 10, delay: distance / 343 });
+  if (!v) return;
+  tone(v.input, v.t0, 'sine', 85, 0.9, 0.003, 0.25, 45);
+  noiseBurst(v.input, v.t0, 'lowpass', 900, 0.7, 0.8, 0.01, 0.6, 250);
+}
+
+/** The pistol breaking open or snapping shut. */
+export function gunBreak(at: Vector3, open: boolean): void {
+  const v = audio.voice({ at, life: 0.2, gain: 0.45 });
+  if (!v) return;
+  noiseBurst(v.input, v.t0, 'bandpass', open ? 2300 : 3300, 3, 0.9, 0.001, 0.045);
+  tone(v.input, v.t0, 'square', open ? 380 : 540, 0.22, 0.001, 0.05);
+  tone(v.input, v.t0 + 0.02, 'sine', open ? 880 : 1320, 0.3, 0.001, 0.06);
+}
+
+/** A cartridge sliding home. */
+export function cartridgeIn(at: Vector3): void {
+  const v = audio.voice({ at, life: 0.15, gain: 0.4 });
+  if (!v) return;
+  noiseBurst(v.input, v.t0, 'bandpass', 1700, 2, 0.6, 0.004, 0.05, 900);
+  tone(v.input, v.t0 + 0.04, 'triangle', 720, 0.35, 0.001, 0.04);
+}
+
+/** Trigger on an empty or fired chamber. */
+export function dryClick(at: Vector3): void {
+  const v = audio.voice({ at, life: 0.06, gain: 0.3 });
+  if (!v) return;
+  tone(v.input, v.t0, 'square', 2300, 0.3, 0.001, 0.015);
+  noiseBurst(v.input, v.t0, 'highpass', 4000, 0.7, 0.4, 0.001, 0.02);
+}

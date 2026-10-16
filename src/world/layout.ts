@@ -16,6 +16,8 @@ export const LAYOUT = {
   range: new Vector3(-6.9, 0, -0.5),
   /** Root of the skyboat pier on the east rim. */
   dock: new Vector3(7.2, 0, 0.9),
+  /** The signal-flare locker, beside the way out to the pier. */
+  flares: new Vector3(5.95, 0, 2.6),
 };
 
 /**

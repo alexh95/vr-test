@@ -110,7 +110,7 @@ Same philosophy as `game-test`: a mechanical verification ladder the agent can r
 | Tool | What it does |
 |---|---|
 | `?emulate` | Installs **IWER** (Meta's WebXR emulation runtime) shaped like the Frame as Chrome sees it (Touch profile, 72–144 Hz, floor space). Any desktop browser can "enter VR" |
-| `?emulate&selftest` | **33 scripted playtest checks** (21 at first, then 6 archery, 1 laser, 5 skyboat): grab and throw, teleport (and refusing the abyss), snap and smooth turn, walking, gravity gloves, painting, marimba by finger and by thrown ball, fireworks from the hand, console buttons (ray and poke), the gravity lever (things float), wrist menu (ray and poke), giant mode, tracked hands, and no frame errors. One JSON line per check. Runs against the dev server and the production build |
+| `?emulate&selftest` | **37 scripted playtest checks** (21 at first, then 6 archery, 1 laser, 5 skyboat, 4 flares): grab and throw, teleport (and refusing the abyss), snap and smooth turn, walking, gravity gloves, painting, marimba by finger and by thrown ball, fireworks from the hand, console buttons (ray and poke), the gravity lever (things float), wrist menu (ray and poke), giant mode, tracked hands, and no frame errors. One JSON line per check. Runs against the dev server and the production build |
 | `window.__vr` | Probe: `state()`, `events()`, `prop(id)`, `snapshot(name)` |
 | `window.__driver` | Moves the emulated head and controllers in **world** coordinates, presses buttons, sweeps hands along paths at real frame rate |
 | `__vr.snapshot()` | Renders the player's view offscreen and posts it to the dev server → `.snapshots/<name>.png` (works while the page is hidden) |
@@ -233,6 +233,63 @@ the crew. She's about 22 draw calls per eye after merging.
 - **Toggle**: B/Y on the bow hand (the brush already uses B/Y for undo, so it means "the tool's own button"),
   also in the wrist menu; it's remembered. It fades in when you pick up the bow.
 
-## 16. Deliberately out of scope (for now)
+## 16. Signal flares (added 2026-10-16)
+
+You asked for a one-shot flare gun, reloadable with different colours and types, including smoke and slowly
+falling flares, with the light ones lighting up the map convincingly.
+
+**The pistol.** A break-action flare pistol, because reloading by hand is the fun part in VR. A / X breaks it
+open (on whichever hand holds it); a fired case is thrown out by the ejector, an unfired one stays in and can be
+pulled out to swap kinds; a cartridge brought to the breech slides in; an upward flick of the wrist (or A / X)
+snaps it shut. A flick is ignored for a quarter second after opening, so the swing that opens it can't close it
+again. The trigger fires one shot; after that it only clicks. Like the bow, it follows the controller's pointing
+ray, with its grip raked to sit in the rendered fist.
+
+**Cartridges.** Three types in three colours. Each type has its own silhouette: white with a domed cap
+(parachute), coloured with a pointed cap (star), or dark with a flat vented cap (smoke). The colour is on the cap,
+so you can tell them apart at a glance. The lockers dispense cartridges rather than storing them as physics props:
+take one and the slot refills two seconds later. A small pool of loose cartridges covers the ones in hands, on the
+floor and flying out of the breech. There are two lockers, one by the way out to the pier and one bolted to the
+skyboat's deck, each with its own pistol. A pistol let go of near its case goes back in.
+
+**Flights.**
+- Ballistics use quadratic drag, with a terminal speed per type.
+- A parachute flare climbs to about 90 m, opens, and sinks under 2 m/s for 38 s, swinging on its cords. If it
+  lands, it keeps burning on the ground.
+- Stars burn for 7 s, skip off what they hit, and pop balloons.
+- Smoke rounds burst at the top and then pour a column under a drogue chute.
+- Everything drifts with a steady wind. Fired from the moving boat, a flare keeps the boat's velocity.
+
+**Lighting up the map.** This is what makes them feel real at night.
+- A fixed pool of lights is handed to the brightest flares each frame:
+  - one spotlight that casts shadows;
+  - three point lights;
+  - an ambient term.
+- The number of lights never changes, only their intensity, so a flare appearing never makes materials
+  recompile (a visible hitch in VR).
+- The spotlight hangs under the brightest parachute flare. It points straight down when the flare is overhead
+  and leans toward you when the flare is far off to the side, so your surroundings are always the part that's
+  lit and shadowed. Its shadows swing as the flare does.
+- Its shadow map only renders while a flare is using it.
+- The cloud sea's shader gets the two brightest flares and lights a pool below them.
+- Smoke is lit on the CPU from the sky plus nearby flares, so a flare's own smoke plume glows.
+- Glow sprites stand in for bloom in the haze, and the light flickers like burning magnesium.
+- Measured: a white parachute flare at night more than doubles the average brightness of a view of the island
+  (0.20 → 0.47 in the self-test).
+
+**Caught in snapshots and fixed:**
+- **No shadows from trees.** The spotlight's shadow depth was useless at 80 m (the bias swallowed anything
+  shorter than about 5 m). The near plane and bias now scale with the flare's height.
+- **Daylight look.** The first version lit the island like daylight; it's now brighter than moonlight but keeps
+  the night, and it gets brighter as the flare sinks.
+- **Beaded trails.** Smoke trails looked like strings of beads; puffs are now laid by distance flown, small and
+  faint.
+- **Wrong row labels.** The case's row labels were back to front.
+- **Z-fighting foam.** The case foam z-fought the case.
+
+**Smoke rendering.** Camera-facing quads, instanced into one draw call, sorted back to front each frame, with
+four puff shapes in a small atlas. They grow, drift, rise and fade, and fog and tone mapping match the scene.
+
+## 17. Deliberately out of scope (for now)
 
 Multiplayer, passthrough / `immersive-ar` (the Frame's passthrough is monochrome and not exposed to WebXR), WebXR Layers (not supported by the community Frame build), eye tracking (not in WebXR), asset pipelines, and saving paintings.

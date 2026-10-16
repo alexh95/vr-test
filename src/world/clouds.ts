@@ -30,6 +30,8 @@ uniform vec3 uFog;
 uniform vec3 uSunDir;
 uniform float uTime;
 uniform int uOctaves;
+uniform vec3 uFlarePos[2];
+uniform vec3 uFlareCol[2];
 varying vec3 vWorld;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -57,6 +59,12 @@ void main() {
   // Fake lighting: brighter on the sun side of each billow.
   float lit = clamp(0.55 + (n2 - n) * 2.2 + dot(normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + 1e-4), normalize(vec3(n - 0.5, 0.3, n2 - 0.5))) * 0.25, 0.0, 1.0);
   vec3 col = mix(uShade, uLit, dens * lit + dens * 0.25);
+  // Flares light the cloud tops below them (inverse square, facing up).
+  for (int i = 0; i < 2; i++) {
+    vec3 L = uFlarePos[i] - vWorld;
+    float d2 = dot(L, L);
+    col += uFlareCol[i] * (max(L.y, 0.0) * inversesqrt(d2 + 1e-3) / (d2 + 30.0)) * (0.3 + 0.7 * dens);
+  }
   float dist = length(vWorld.xz - cameraPosition.xz);
   col = mix(col, uFog, smoothstep(120.0, 820.0, dist));
   gl_FragColor = vec4(col, 1.0);
@@ -75,6 +83,8 @@ export class Clouds {
     uSunDir: { value: new Vector3() },
     uTime: { value: 0 },
     uOctaves: { value: 5 },
+    uFlarePos: { value: [new Vector3(), new Vector3()] },
+    uFlareCol: { value: [new Vector3(), new Vector3()] },
   };
   private readonly puffMat: MeshLambertMaterial;
   private readonly base: { pos: Vector3; scale: Vector3; speed: number; phase: number }[] = [];
@@ -131,6 +141,20 @@ export class Clouds {
     this.seaUniforms.uSunDir.value.copy(p.skySunDir);
     this.puffMat.color.copy(p.cloudLit).multiplyScalar(0.85);
     this.puffMat.emissive.copy(p.cloudShade).multiplyScalar(0.55);
+  }
+
+  /** Up to two burning flares light the sea of clouds from above. */
+  setFlares(flares: readonly { pos: Vector3; color: Color; intensity: number }[]): void {
+    for (let i = 0; i < 2; i++) {
+      const f = flares[i];
+      const col = this.seaUniforms.uFlareCol.value[i];
+      if (!f) {
+        col.set(0, 0, 0);
+        continue;
+      }
+      this.seaUniforms.uFlarePos.value[i].copy(f.pos);
+      col.set(f.color.r, f.color.g, f.color.b).multiplyScalar(f.intensity * 0.2);
+    }
   }
 
   update(time: number, camera?: Camera): void {

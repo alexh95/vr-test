@@ -17,9 +17,7 @@ export interface SnapshotOptions {
  * Render the player's view (or a given camera) offscreen and POST it to the dev
  * server, which writes .snapshots/<name>.png. Works with the page hidden.
  */
-export async function snapshot(app: App, name: string, o: SnapshotOptions = {}): Promise<string> {
-  const width = o.width ?? 1280;
-  const height = o.height ?? 720;
+function snapshotCamera(app: App, o: SnapshotOptions, width: number, height: number): Camera {
   let cam = o.camera;
   if (!cam) {
     // Same near/far as the player's eyes, so depth precision (z-fighting) matches the headset.
@@ -38,6 +36,51 @@ export async function snapshot(app: App, name: string, o: SnapshotOptions = {}):
     pc.updateMatrixWorld(true);
     cam = pc;
   }
+  return cam;
+}
+
+/** Render offscreen (tone mapped, sRGB, like the headset) and read the pixels back, top row first. */
+function renderPixels(app: App, cam: Camera, W: number, H: number): Uint8Array {
+  const rt = new WebGLRenderTarget(W, H);
+  rt.texture.colorSpace = SRGBColorSpace;
+  (rt as WebGLRenderTarget & { isXRRenderTarget: boolean }).isXRRenderTarget = true;
+  const r = app.renderer;
+  const xrEnabled = r.xr.enabled;
+  const prevTarget = r.getRenderTarget();
+  r.xr.enabled = false;
+  r.setRenderTarget(rt);
+  r.clear();
+  r.render(app.scene, cam);
+  r.setRenderTarget(prevTarget);
+  r.xr.enabled = xrEnabled;
+  const px = new Uint8Array(W * H * 4);
+  r.readRenderTargetPixels(rt, 0, 0, W, H, px);
+  rt.dispose();
+  return px;
+}
+
+/**
+ * Average brightness (0..1, Rec. 709 luma of the displayed colour) of a view:
+ * lets a test check that something actually lit the scene up.
+ */
+export function measureLuma(app: App, o: SnapshotOptions = {}): number {
+  const W = o.width ?? 192;
+  const H = o.height ?? 108;
+  const cam = snapshotCamera(app, o, W, H);
+  if (cam instanceof PerspectiveCamera) {
+    cam.aspect = W / H;
+    cam.updateProjectionMatrix();
+  }
+  const px = renderPixels(app, cam, W, H);
+  let sum = 0;
+  for (let i = 0; i < px.length; i += 4) sum += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+  return sum / (W * H * 255);
+}
+
+export async function snapshot(app: App, name: string, o: SnapshotOptions = {}): Promise<string> {
+  const width = o.width ?? 1280;
+  const height = o.height ?? 720;
+  const cam = snapshotCamera(app, o, width, height);
   // Supersample 2x instead of MSAA: an XR-flagged render target with samples > 0
   // fails to resolve in WebGL (INVALID_OPERATION), and we need the XR flag for
   // tone mapping + sRGB output to match what the headset shows.

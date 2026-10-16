@@ -2,6 +2,8 @@ import { Quaternion, Vector3 } from 'three';
 import { setSetting, settings } from '../core/settings';
 import { HELM } from '../skyboat/boat-model';
 import { THROTTLE_MAX } from '../skyboat/skyboat';
+import type { FlareGun } from '../flares/flares';
+import { measureLuma } from './snapshot';
 import type { App } from '../app';
 import type { Emu } from './emulator';
 import { createDriver, type Driver } from './driver';
@@ -120,6 +122,75 @@ async function sweepOnBoat(d: Driver, side: 'left' | 'right', path: (k: number) 
 
 /** Where the head is on the deck. */
 const headOnBoat = (d: Driver) => d.app.boat.toLocal(d.head(), new Vector3());
+
+// ---- flare helpers ----
+
+/** Stand facing a flare locker, half a metre in front of it. */
+async function standAtLocker(d: Driver, gun: FlareGun): Promise<Vector3> {
+  const L = gun.home;
+  const q = L.root.getWorldQuaternion(new Quaternion());
+  const front = new Vector3(0, 0, 1).applyQuaternion(q).setY(0).normalize();
+  const feet = L.root.getWorldPosition(new Vector3()).addScaledVector(front, 0.55);
+  const yaw = Math.atan2(front.x, front.z) + Math.PI; // facing the locker
+  d.app.rig.position.copy(feet);
+  d.app.rig.rotation.y = yaw;
+  d.app.updateRig();
+  d.setHeadWorld(feet.clone().setY(feet.y + 1.6), (yaw * 180) / Math.PI, -35);
+  await d.frames(4);
+  return front.negate();
+}
+
+/** Take the pistol out of its case with the right hand and hold it out in front. */
+async function takePistol(d: Driver, gun: FlareGun, fwd: Vector3): Promise<Vector3> {
+  d.setGripWorld('right', gun.holsterWorld(new Vector3()), new Quaternion());
+  await d.frames(3);
+  d.press('right', 'squeeze', 1);
+  await d.frames(3);
+  expect(d.app.grab.held(d.app.input.right) === gun.prop, 'pistol not in hand');
+  const at = d.head().addScaledVector(fwd, 0.35).add(new Vector3(0.12, -0.25, 0));
+  d.setAimWorld('right', at, d.lookQuat(at, at.clone().add(fwd).add(new Vector3(0, 0.15, 0))));
+  // Wait in time, not frames: the swing up from the case must leave the velocity window.
+  await d.seconds(0.25);
+  return at;
+}
+
+async function pressA(d: Driver): Promise<void> {
+  d.press('right', 'a-button', 1);
+  await d.frames(2);
+  d.press('right', 'a-button', 0);
+  await d.frames(6);
+}
+
+/** Left hand takes a cartridge of `kind` from the gun's locker and pushes it into the open breech. */
+async function loadCartridge(d: Driver, gun: FlareGun, kind: string): Promise<void> {
+  const slot = gun.home.slots.find((s) => s.kind.id === kind)!;
+  d.setGripWorld('left', gun.home.slotWorld(slot, new Vector3()), new Quaternion());
+  await d.frames(3);
+  d.press('left', 'squeeze', 1);
+  await d.frames(3);
+  const held = d.app.grab.held(d.app.input.left);
+  expect(!!held && held.id.startsWith('flare-cartridge'), `left hand holds ${held?.id ?? 'nothing'}`);
+  // Move toward wherever the breech is now (the boat may be carrying both hands along).
+  const offset = d.app.input.left.grip.position.clone().sub(gun.mouthWorld(new Vector3()));
+  const t0 = performance.now();
+  for (;;) {
+    const k = Math.min(1, (performance.now() - t0) / 300);
+    d.setGripWorld('left', gun.mouthWorld(new Vector3()).addScaledVector(offset, 1 - k), new Quaternion());
+    await d.frames(1);
+    if (k >= 1) break;
+  }
+  await d.frames(3);
+  d.press('left', 'squeeze', 0);
+  expect(gun.chamber?.id === kind, `chamber holds ${gun.chamber?.id ?? 'nothing'}`);
+  expect(!d.app.grab.held(d.app.input.left), 'the cartridge stayed in the hand');
+}
+
+async function pullTrigger(d: Driver): Promise<void> {
+  d.press('right', 'trigger', 1);
+  await d.frames(3);
+  d.press('right', 'trigger', 0);
+  await d.frames(3);
+}
 
 const CHECKS: Check[] = [
   [
@@ -783,6 +854,128 @@ const CHECKS: Check[] = [
       const miss = Math.hypot(eye.x - target!.x, eye.z - target!.z);
       expect(miss < 0.06, `landed ${miss.toFixed(2)} m from the aimed spot on the moving deck`);
       return { miss: +miss.toFixed(3), landing: target!.toArray().map((v) => +v.toFixed(2)) };
+    },
+  ],
+  [
+    'flare-gun-reload-cycle',
+    async (d) => {
+      const gun = d.app.flares.guns[0];
+      const fwd = await standAtLocker(d, gun);
+      const at = await takePistol(d, gun, fwd);
+      await pressA(d);
+      expect(gun.open, 'A did not break it open');
+      await loadCartridge(d, gun, 'parachute-white');
+      // Snap it shut with a flick of the wrist (muzzle up, fast).
+      const t0 = performance.now();
+      for (;;) {
+        const k = Math.min(1, (performance.now() - t0) / 70);
+        d.setAimWorld('right', at, d.lookQuat(at, at.clone().add(fwd).add(new Vector3(0, 0.15 + k * 2.5, 0))));
+        await d.frames(1);
+        if (k >= 1) break;
+      }
+      await d.frames(4);
+      expect(!gun.open, 'the flick did not close it');
+      // One shot, straight up.
+      d.setAimWorld('right', at, d.lookQuat(at, at.clone().addScaledVector(fwd, 0.3).add(new Vector3(0, 1, 0))));
+      await d.frames(3);
+      const fires = d.count('flare-fire');
+      await pullTrigger(d);
+      expect(d.count('flare-fire') === fires + 1, 'it did not fire');
+      expect(d.app.flares.flights.active >= 1, 'nothing in the air');
+      const dry = d.count('flare-dry');
+      await pullTrigger(d);
+      expect(d.count('flare-dry') === dry + 1 && d.count('flare-fire') === fires + 1, 'a second shot without reloading');
+      // Breaking it open throws out the fired case.
+      const ejects = d.count('flare-eject');
+      await pressA(d);
+      expect(gun.open && d.count('flare-eject') === ejects + 1 && !gun.chamber, 'the fired case was not ejected');
+      // Back into its case.
+      d.setGripWorld('right', gun.holsterWorld(new Vector3()), new Quaternion());
+      await d.frames(3);
+      d.press('right', 'squeeze', 0);
+      await d.frames(3);
+      expect(gun.docked && !gun.prop.object.visible && gun.home.dockedGun.visible, 'the pistol did not go back in its case');
+      return { shots: gun.shots };
+    },
+  ],
+  [
+    'flare-parachute-lights-the-night',
+    async (d) => {
+      const app = d.app;
+      app.tod.set('night', 0);
+      try {
+        await d.frames(3);
+        const cam = { from: [-1.5, 3.2, 6.5] as [number, number, number], to: [-5.5, 0.2, 3.5] as [number, number, number], fov: 75 };
+        const before = measureLuma(app, cam);
+        const deploys = d.count('flare-deploy');
+        app.flares.launch('parachute-white', new Vector3(0, 1.2, 1.2), new Vector3(0.1, 1, 0.05));
+        await d.waitFor(() => d.count('flare-deploy') > deploys, 7, 'the parachute to open');
+        await d.seconds(1);
+        const flight = () => app.flares.flights.summary().find((f) => f.kind === 'parachute-white')!;
+        const y0 = flight().y;
+        const spot = app.flares.lights.spot.intensity;
+        await d.seconds(1);
+        const sink = y0 - flight().y;
+        const after = measureLuma(app, cam);
+        expect(y0 > 50, `it only got to ${y0} m`);
+        expect(spot > 4000, `spotlight at ${spot.toFixed(0)}`);
+        expect(sink > 1 && sink < 4, `sinking ${sink.toFixed(2)} m/s under the canopy`);
+        expect(after > before * 1.5, `the island only went from ${before.toFixed(3)} to ${after.toFixed(3)} brightness`);
+        return { height: y0, sink: +sink.toFixed(2), before: +before.toFixed(3), after: +after.toFixed(3) };
+      } finally {
+        app.tod.set('sunset', 0);
+      }
+    },
+  ],
+  [
+    'flare-star-and-smoke',
+    async (d) => {
+      const app = d.app;
+      app.flares.launch('star-red', new Vector3(0, 1.2, 1.2), new Vector3(0, 1, -0.6));
+      await d.seconds(0.5);
+      const point = Math.max(...app.flares.lights.points.map((p) => p.intensity));
+      expect(point > 2000, `the star lights nothing (${point.toFixed(0)})`);
+      const deploys = d.count('flare-deploy');
+      app.flares.launch('smoke-violet', new Vector3(0, 1.2, 1.2), new Vector3(0.2, 1, 0));
+      await d.waitFor(() => d.count('flare-deploy') > deploys, 6, 'the smoke charge to burst');
+      await d.seconds(1.5);
+      const smoke = app.flares.smoke.count;
+      expect(smoke > 150, `only ${smoke} smoke puffs`);
+      return { starLight: Math.round(point), smoke };
+    },
+  ],
+  [
+    'flare-gun-on-the-boat',
+    async (d) => {
+      const app = d.app;
+      const boat = app.boat;
+      const gun = app.flares.guns[1];
+      launchBoat(d);
+      boat.throttleAngle = THROTTLE_MAX * 0.5;
+      await boardBoat(d);
+      await d.seconds(1);
+      expect(boat.speed > 1, 'the boat is not moving');
+      // The deck locker works under way: take the pistol and a star, load, fire ahead.
+      const fwd = await standAtLocker(d, gun);
+      expect(boat.aboard, 'stepped off the boat');
+      await takePistol(d, gun, fwd);
+      await pressA(d);
+      expect(gun.open, 'A did not break it open');
+      await loadCartridge(d, gun, 'star-gold');
+      await pressA(d);
+      expect(!gun.open, 'A did not close it');
+      const fires = d.count('flare-fire');
+      await pullTrigger(d);
+      expect(d.count('flare-fire') === fires + 1, 'it did not fire');
+      const shot = d.last('flare-fire') as { id: string };
+      expect(shot.id === 'boat-flare-gun', `fired ${shot.id}`);
+      d.setGripWorld('right', gun.holsterWorld(new Vector3()), new Quaternion());
+      await d.frames(3);
+      d.press('right', 'squeeze', 0);
+      await d.frames(3);
+      boat.throttleAngle = 0;
+      expect(gun.docked, 'the pistol did not go back in the deck locker');
+      return { boatSpeed: +boat.speed.toFixed(2) };
     },
   ],
   [

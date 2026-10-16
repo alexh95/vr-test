@@ -36,6 +36,7 @@ import { ArrowSystem } from './archery/arrows';
 import { Bow } from './archery/bow';
 import { EYES_ONLY_LAYER } from './archery/scope';
 import { SkyBoat } from './skyboat/skyboat';
+import { Flares } from './flares/flares';
 
 const GIANT_SCALE = 8;
 const _follow = new Vector3();
@@ -77,6 +78,7 @@ export class App {
   arrows!: ArrowSystem;
   bow!: Bow;
   boat!: SkyBoat;
+  flares!: Flares;
   readonly ambience = new Ambience();
   private orbit!: OrbitControls;
   private readonly shadowTarget = new Object3D();
@@ -175,6 +177,7 @@ export class App {
     this.arrows = new ArrowSystem(this);
     this.bow = new Bow(this);
     this.boat = new SkyBoat(this);
+    this.flares = new Flares(this);
     this.physics.beforeStep = (_dt, ahead) => {
       this.grab.beforeStep();
       this.boat.beforeStep(ahead);
@@ -305,12 +308,14 @@ export class App {
       if (this.locomotion.update(dt, busy)) this.updateRig();
       this.console.update(dt, claimed);
       this.boat.controls(claimed);
+      this.flares.preUpdate(claimed);
       this.bow.preUpdate(claimed);
       for (const h of claimed) busy.add(h);
       this.grab.update(dt, claimed);
       this.gloves.update(dt, busy);
     }
     this.bow.update(dt);
+    this.flares.update(dt);
     this.range.update(dt, this.time);
     this.arrows.update(dt);
     this.brushes.update(this.time);
@@ -339,7 +344,9 @@ export class App {
     this.ambience.update();
     if (!inXR) this.orbit.update();
     audio.updateListener(this.camera);
-    // Last: the bow and the player's head are where they'll be drawn this frame.
+    // Last: everything is where it'll be drawn this frame. Flares hand out their
+    // lights first, so the scope's view is lit by them too.
+    this.flares.lateUpdate(dt);
     this.bow.lateUpdate(dt, this.time);
     this.onFrame?.(dt);
   }
@@ -411,6 +418,7 @@ export class App {
     this.arrows.clear();
     this.range.resetScore();
     this.boat.reset();
+    this.flares.reset();
   }
 
   applyQuality(): void {
