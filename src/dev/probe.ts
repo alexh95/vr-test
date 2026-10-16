@@ -53,6 +53,17 @@ export function installProbe(app: App, emu: Emu | null): void {
         session: app.xr.info
           ? { ...app.xr.info, boundedSpace: !!app.xr.info.boundedSpace, playAreaPoints: app.playArea.points }
           : null,
+        boat: {
+          pos: r3(app.boat.pos),
+          bearing: +app.boat.bearing.toFixed(1),
+          speed: +app.boat.speed.toFixed(2),
+          climb: +app.boat.climb.toFixed(2),
+          throttle: +app.boat.throttle.toFixed(2),
+          lift: +app.boat.lift.toFixed(2),
+          wheelDeg: +((app.boat.wheel * 180) / Math.PI).toFixed(0),
+          aboard: app.boat.aboard,
+        },
+        laser: { level: +app.bow.laser.level.toFixed(2), hit: app.bow.laser.hit.kind, id: app.bow.laser.hit.id, distance: +app.bow.laser.hit.distance.toFixed(1) },
         settings: { ...settings },
         counts: { ...bus.counts },
         errors: app.errors.length,

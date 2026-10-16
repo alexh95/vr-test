@@ -228,7 +228,7 @@ export class AudioEngine {
   }
 }
 
-function setPannerPosition(p: PannerNode, v: Vector3): void {
+export function setPannerPosition(p: PannerNode, v: Vector3): void {
   if (p.positionX) {
     const t = p.context.currentTime;
     p.positionX.setValueAtTime(v.x, t);

@@ -205,6 +205,9 @@ export class WristMenu {
       case 'fingers':
         setSetting('jointHands', value === 'joints');
         break;
+      case 'laser':
+        setSetting('laser', value === 'on');
+        break;
       case 'action':
         if (value === 'recenter') this.app.locomotion.recenter();
         if (value === 'clear') this.app.brushes.clear();
@@ -246,6 +249,7 @@ export class WristMenu {
       ['Quality', [['quality:high', 'High', settings.quality === 'high'], ['quality:low', 'Low', settings.quality === 'low']]],
       ['Music', [['music:on', 'On', settings.music], ['music:off', 'Off', !settings.music]]],
       ['Fingers', [['fingers:touch', 'Touch', !settings.jointHands], ['fingers:joints', 'Joints', settings.jointHands]]],
+      ['Bow laser', [['laser:on', 'On', settings.laser], ['laser:off', 'Off', !settings.laser]]],
     ];
     const c = this.ctx;
     let y = 90;
@@ -256,8 +260,8 @@ export class WristMenu {
       c.fillText(label, 30, y + 22);
       const total = 420;
       const w = total / opts.length - 8;
-      opts.forEach(([id, text, on], i) => this.button(id, text, 196 + i * (w + 8), y, w, 44, on));
-      y += 54;
+      opts.forEach(([id, text, on], i) => this.button(id, text, 196 + i * (w + 8), y, w, 42, on));
+      y += 48;
     }
     y += 8;
     const actions: [string, string][] = [

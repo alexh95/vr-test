@@ -220,9 +220,9 @@ export class TargetRange {
     this.rackQuat.copy(d.getWorldQuaternion(new Quaternion()));
 
     // Instructions on the rack post.
-    const tip = makeLabel(['SKY RANGE', 'grab the bow by its grip · grab the string with your other hand', 'draw back to your cheek · let go · red dot zeroed at 35 m'], {
+    const tip = makeLabel(['SKY RANGE', 'grab the bow by its grip · grab the string with your other hand', 'draw back to your cheek · let go · red dot zeroed at 35 m', 'B / Y on the bow hand: laser sight on or off'], {
       width: 0.6,
-      aspect: 0.3,
+      aspect: 0.38,
       px: 1024,
       background: 'rgba(25,20,35,0.85)',
       font: '600 40px system-ui, sans-serif',

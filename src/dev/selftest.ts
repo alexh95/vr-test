@@ -1,5 +1,7 @@
 import { Quaternion, Vector3 } from 'three';
-import { setSetting } from '../core/settings';
+import { setSetting, settings } from '../core/settings';
+import { HELM } from '../skyboat/boat-model';
+import { THROTTLE_MAX } from '../skyboat/skyboat';
 import type { App } from '../app';
 import type { Emu } from './emulator';
 import { createDriver, type Driver } from './driver';
@@ -76,6 +78,48 @@ function shootDirect(d: Driver, from: Vector3, to: Vector3, speed: number): void
   const a = d.app.arrows.nock();
   d.app.arrows.fire(a, from, to.clone().sub(from).normalize(), speed);
 }
+
+// ---- skyboat helpers ----
+const PILOT_EYE = new Vector3(0, 1.6, 2.55); // boat frame
+
+/** Move the boat out into open sky, clear of the pier and the island. */
+function launchBoat(d: Driver): void {
+  d.app.boat.placeAt(new Vector3(14, 6, 14), Math.PI);
+}
+
+/** Stand at the helm, facing the bow. */
+async function boardBoat(d: Driver): Promise<void> {
+  const boat = d.app.boat;
+  const feet = boat.toWorld(new Vector3(0, 0, PILOT_EYE.z), new Vector3());
+  d.app.rig.position.copy(feet);
+  d.app.rig.rotation.y = boat.heading;
+  d.app.updateRig();
+  d.setHeadWorld(boat.toWorld(PILOT_EYE, new Vector3()), (boat.heading * 180) / Math.PI);
+  // Hands down at the sides, away from the controls.
+  for (const [side, x] of [['left', -0.25], ['right', 0.25]] as const) gripOnBoat(d, side, new Vector3(x, 0.85, 2.75));
+  await d.frames(4);
+  expect(boat.aboard, 'not aboard after stepping onto the deck');
+}
+
+/** Put a hand at a point given in the boat's frame (palm level). */
+function gripOnBoat(d: Driver, side: 'left' | 'right', local: Vector3): void {
+  const boat = d.app.boat;
+  d.setGripWorld(side, boat.toWorld(local, new Vector3()), new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), boat.heading));
+}
+
+/** Move a hand along a path in the boat's frame over `s` seconds (the boat may be moving). */
+async function sweepOnBoat(d: Driver, side: 'left' | 'right', path: (k: number) => Vector3, s: number): Promise<void> {
+  const t0 = performance.now();
+  for (;;) {
+    const k = Math.min(1, (performance.now() - t0) / 1000 / s);
+    gripOnBoat(d, side, path(k));
+    await d.frames(1);
+    if (k >= 1) return;
+  }
+}
+
+/** Where the head is on the deck. */
+const headOnBoat = (d: Driver) => d.app.boat.toLocal(d.head(), new Vector3());
 
 const CHECKS: Check[] = [
   [
@@ -155,14 +199,14 @@ const CHECKS: Check[] = [
   [
     'teleport-rejects-abyss',
     async (d) => {
-      // Aim off the island's open edge (+X side, away from the stepping stones): no landing.
-      d.app.rig.position.set(7.2, 0, 1.5);
-      d.app.rig.rotation.y = -Math.PI / 2; // face +X
+      // Aim off the island's open south edge (the east rim has the pier): no landing.
+      d.app.rig.position.set(-1, 0, 7.3);
+      d.app.rig.rotation.y = Math.PI; // face +Z
       d.app.updateRig();
-      d.setHeadWorld(new Vector3(7.2, 1.6, 1.5), -90);
+      d.setHeadWorld(new Vector3(-1, 1.6, 7.3), 180);
       await d.frames(3);
       const hp = d.head();
-      d.setAimWorld('right', hp.clone().add(new Vector3(0.3, -0.3, 0.15)), d.lookQuat(hp, hp.clone().add(new Vector3(10, 1.5, 0))));
+      d.setAimWorld('right', hp.clone().add(new Vector3(-0.15, -0.3, 0.3)), d.lookQuat(hp, hp.clone().add(new Vector3(0, 1.5, 10))));
       d.emu.stick('right', 0, -1);
       await d.frames(15);
       const valid = d.app.locomotion.target.valid;
@@ -560,6 +604,185 @@ const CHECKS: Check[] = [
       const dist = p.object.position.distanceTo(rack);
       expect(!p.heldBy && dist < 0.01, `bow is ${dist.toFixed(2)} m from the rack`);
       return { dist: +dist.toFixed(3) };
+    },
+  ],
+  [
+    'laser-dot-on-target',
+    async (d) => {
+      setSetting('laser', true);
+      await standOnDeck(d);
+      await takeBow(d);
+      const near = d.app.range.targets.find((t) => t.id === 'near')!;
+      // Hold the bow up at the target, no draw: the laser shows where it points.
+      const head = d.head();
+      const aim = near.group.position.clone();
+      const bowAt = head.clone().addScaledVector(aim.clone().sub(head).normalize(), 0.62).add(new Vector3(0, -0.12, 0));
+      d.setAimWorld('left', bowAt, d.lookQuat(bowAt, aim));
+      await d.seconds(0.6);
+      const L = d.app.bow.laser;
+      expect(L.level > 0.95, `laser level ${L.level.toFixed(2)}`);
+      expect(L.hit.kind === 'target' && L.hit.id === 'near', `laser lands on ${L.hit.kind} ${L.hit.id}`);
+      expect(L.dot.visible && L.beam.visible, 'dot or beam hidden');
+      const local = L.hit.point.clone().applyMatrix4(near.inv);
+      const off = Math.hypot(local.x, local.y);
+      expect(off < near.radius, `dot ${off.toFixed(2)} m from the centre, off the face`);
+      // The beam crosses the scope's line of sight at the zero distance (35 m).
+      const lens = d.app.bow.scope.lens.getWorldPosition(new Vector3());
+      const zeroPoint = lens.clone().addScaledVector(d.app.bow.scope.axis(new Vector3()), 35);
+      const onBeam = L.origin.clone().addScaledVector(L.dir, zeroPoint.distanceTo(L.origin));
+      expect(onBeam.distanceTo(zeroPoint) < 0.06, `beam misses the scope's zero point by ${onBeam.distanceTo(zeroPoint).toFixed(3)} m`);
+      // Y on the bow hand (left) switches it off, and on again.
+      d.press('left', 'y-button', 1);
+      await d.frames(3);
+      d.press('left', 'y-button', 0);
+      await d.seconds(0.6);
+      expect(!settings.laser && L.level === 0 && !L.beam.visible, `laser still on (level ${L.level.toFixed(2)})`);
+      d.press('left', 'y-button', 1);
+      await d.frames(3);
+      d.press('left', 'y-button', 0);
+      await d.seconds(0.4);
+      expect(settings.laser && L.level > 0.9, 'laser did not come back on');
+      return { distance: +L.hit.distance.toFixed(2), offCentre: +off.toFixed(3), zeroMiss: +onBeam.distanceTo(zeroPoint).toFixed(3) };
+    },
+  ],
+  [
+    'skyboat-throttle-flies',
+    async (d) => {
+      const boat = d.app.boat;
+      await boardBoat(d);
+      // Right hand on the throttle knob, push it forward to the stop.
+      const knob0 = boat.throttleKnobLocal(new Vector3(), 0);
+      const full = boat.throttleKnobLocal(new Vector3(), THROTTLE_MAX);
+      gripOnBoat(d, 'right', knob0);
+      await d.frames(3);
+      d.press('right', 'squeeze', 1);
+      await d.frames(3);
+      expect(boat.controlOf(d.app.input.right) === 'throttle', `right hand on ${boat.controlOf(d.app.input.right)}`);
+      await sweepOnBoat(d, 'right', (k) => knob0.clone().lerp(full, k), 0.35);
+      expect(boat.throttle > 0.9, `throttle at ${boat.throttle.toFixed(2)}`);
+      const start = boat.pos.clone();
+      const eye0 = headOnBoat(d);
+      await d.seconds(2);
+      const moved = boat.pos.distanceTo(start);
+      const eye1 = headOnBoat(d);
+      // Back to neutral and let go: the detent holds it at zero.
+      await sweepOnBoat(d, 'right', (k) => full.clone().lerp(knob0, k), 0.3);
+      d.press('right', 'squeeze', 0);
+      await d.frames(3);
+      expect(moved > 3, `boat moved only ${moved.toFixed(2)} m`);
+      expect(boat.pos.z > start.z + 3, 'boat did not go toward its bow');
+      expect(eye1.distanceTo(eye0) < 0.03, `the player slid ${eye1.distanceTo(eye0).toFixed(3)} m on the deck`);
+      expect(boat.aboard, 'fell off the boat');
+      expect(boat.throttle === 0, `throttle left at ${boat.throttle.toFixed(2)}`);
+      return { moved: +moved.toFixed(2), speed: +boat.speed.toFixed(2), slide: +eye1.distanceTo(eye0).toFixed(4) };
+    },
+  ],
+  [
+    'skyboat-helm-turns',
+    async (d) => {
+      const boat = d.app.boat;
+      launchBoat(d);
+      await boardBoat(d);
+      const h0 = boat.heading;
+      const yaw0 = d.app.rig.rotation.y;
+      // Right hand on the rim at 3 o'clock; turn the wheel up and over to the left (counter-clockwise).
+      gripOnBoat(d, 'right', boat.wheelRimLocal(0, new Vector3()));
+      await d.frames(3);
+      d.press('right', 'squeeze', 1);
+      await d.frames(3);
+      expect(boat.controlOf(d.app.input.right) === 'wheel', `right hand on ${boat.controlOf(d.app.input.right)}`);
+      await sweepOnBoat(d, 'right', (k) => boat.wheelRimLocal(k * 2.2, new Vector3()), 0.6);
+      expect(boat.wheel > 2, `wheel at ${((boat.wheel * 180) / Math.PI).toFixed(0)}°`);
+      const eye0 = headOnBoat(d);
+      await d.seconds(1.5);
+      const turned = boat.heading - h0;
+      const eye1 = headOnBoat(d);
+      d.press('right', 'squeeze', 0);
+      await d.seconds(1.5);
+      expect(turned > 0.12, `turned ${((turned * 180) / Math.PI).toFixed(1)}° (left)`);
+      expect(Math.abs(d.app.rig.rotation.y - yaw0 - (boat.heading - h0)) < 0.01, 'the player did not turn with the boat');
+      expect(eye1.distanceTo(eye0) < 0.03, `the player slid ${eye1.distanceTo(eye0).toFixed(3)} m while turning`);
+      expect(Math.abs(boat.wheel) < 0.4, `wheel did not self-centre (${boat.wheel.toFixed(2)} rad)`);
+      return { turnedDeg: +((turned * 180) / Math.PI).toFixed(1) };
+    },
+  ],
+  [
+    'skyboat-lift-climbs',
+    async (d) => {
+      const boat = d.app.boat;
+      launchBoat(d);
+      await boardBoat(d);
+      const grip0 = boat.liftGripLocal(new Vector3(), 0);
+      gripOnBoat(d, 'left', grip0);
+      await d.frames(3);
+      d.press('left', 'squeeze', 1);
+      await d.frames(3);
+      expect(boat.controlOf(d.app.input.left) === 'lift', `left hand on ${boat.controlOf(d.app.input.left)}`);
+      const y0 = boat.pos.y;
+      const eye0 = headOnBoat(d);
+      await sweepOnBoat(d, 'left', (k) => grip0.clone().setY(grip0.y + 0.13 * k), 0.25);
+      await d.seconds(1.5);
+      const climbed = boat.pos.y - y0;
+      const eye1 = headOnBoat(d);
+      d.press('left', 'squeeze', 0);
+      await d.seconds(1.5);
+      expect(climbed > 1.5, `climbed only ${climbed.toFixed(2)} m`);
+      expect(eye1.distanceTo(eye0) < 0.03, `the player slid ${eye1.distanceTo(eye0).toFixed(3)} m while climbing`);
+      expect(Math.abs(boat.lift) < 0.05 && Math.abs(boat.climb) < 0.3, `handle did not spring back (lift ${boat.lift.toFixed(2)}, climb ${boat.climb.toFixed(2)})`);
+      return { climbed: +climbed.toFixed(2), handle: +(HELM.liftTravel * 100).toFixed(0) };
+    },
+  ],
+  [
+    'skyboat-stops-at-cliff',
+    async (d) => {
+      const boat = d.app.boat;
+      // Below the rim, bow first into the main island's rock face.
+      boat.placeAt(new Vector3(17, -2.5, 4.5), Math.PI / 2);
+      const bumps = d.count('boat-bump');
+      boat.throttleAngle = THROTTLE_MAX;
+      await d.seconds(3.5);
+      boat.throttleAngle = 0;
+      expect(d.count('boat-bump') > bumps, 'no bump');
+      // Touching, not inside: no overlap now, and something solid within a hand's width ahead.
+      const ahead = boat.clearance(new Vector3(-1, 0, 0), 1);
+      expect(!boat.overlapping(), 'the hull is inside the rock');
+      expect(ahead < 0.15, `stopped ${ahead.toFixed(2)} m short of anything`);
+      expect(Math.abs(boat.speed) < 0.5, `still pushing on at ${boat.speed.toFixed(2)} m/s`);
+      return { bowX: +(boat.pos.x - 3.2).toFixed(2), gap: +ahead.toFixed(3) };
+    },
+  ],
+  [
+    'skyboat-teleport-aboard-underway',
+    async (d) => {
+      const boat = d.app.boat;
+      // Standing at the end of the pier as the boat goes by, slowly, a few metres out.
+      boat.placeAt(new Vector3(15.6, 0.12, 2), Math.PI);
+      boat.throttleAngle = THROTTLE_MAX * 0.25;
+      boat.speed = 1.5;
+      d.app.rig.position.set(11, 0.12, 0.9);
+      d.app.rig.rotation.y = -Math.PI / 2;
+      d.app.updateRig();
+      d.setHeadWorld(new Vector3(11, 1.72, 0.9), -90);
+      await d.frames(3);
+      // Hold the stick forward and raise the aim until the arc lands on the deck.
+      let target: Vector3 | null = null;
+      d.emu.stick('right', 0, -1);
+      for (let pitch = -40; pitch <= 10 && !target; pitch += 3) {
+        const hp = d.head();
+        d.setAimWorld('right', hp.clone().add(new Vector3(0.15, -0.35, 0.2)), new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -Math.PI / 2).multiply(d.qx(pitch)));
+        await d.frames(3);
+        const t = d.app.locomotion.target;
+        if (t.valid && t.platform === boat.root) target = boat.toLocal(t.point, new Vector3());
+      }
+      expect(!!target, 'never found a landing on the deck');
+      d.emu.stick('right', 0, 0);
+      await d.frames(30);
+      boat.throttleAngle = 0;
+      expect(boat.aboard, 'not aboard after the teleport');
+      const eye = headOnBoat(d);
+      const miss = Math.hypot(eye.x - target!.x, eye.z - target!.z);
+      expect(miss < 0.06, `landed ${miss.toFixed(2)} m from the aimed spot on the moving deck`);
+      return { miss: +miss.toFixed(3), landing: target!.toArray().map((v) => +v.toFixed(2)) };
     },
   ],
   [

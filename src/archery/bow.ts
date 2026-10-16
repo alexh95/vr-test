@@ -2,6 +2,7 @@ import {
   BoxGeometry,
   BufferAttribute,
   CatmullRomCurve3,
+  CircleGeometry,
   Color,
   CylinderGeometry,
   DoubleSide,
@@ -18,11 +19,12 @@ import {
 import { bus } from '../core/events';
 import { mergeColored } from '../core/merge';
 import { clamp, smoothstep } from '../core/math';
-import { settings } from '../core/settings';
+import { setSetting, settings } from '../core/settings';
 import type { HandInput } from '../input/xr-input';
 import { RAPIER, type Prop } from '../physics/physics';
-import { bowCreak, bowTwang, uiTick } from '../audio/sfx';
+import { bowCreak, bowTwang, laserClick, uiTick } from '../audio/sfx';
 import { ARROW_LEN, type Arrow } from './arrows';
+import { BowLaser } from './laser';
 import { Scope } from './scope';
 import type { App } from '../app';
 
@@ -41,6 +43,7 @@ const ZERO_DISTANCE = 35; // the red dot and the arrow meet here at full draw
 const SCOPE_AT = new Vector3(0, 0.142, -0.13); // 7.7 cm above the arrow
 const LIMB_BEND = 0.28; // rad at full draw
 const NOCK_REACH = 0.15; // how close the draw hand must come to the string
+const LASER_AT = new Vector3(0.045, 0.118, -0.127); // laser module under the sight bar: its lens
 
 const UP = new Vector3(0, 1, 0);
 const _v = new Vector3();
@@ -108,6 +111,10 @@ export class Bow {
   private strainAt = 0;
   shots = 0;
   readonly zero = zeroAngle();
+  readonly laser: BowLaser;
+  /** Beam direction (bow frame): it crosses the scope's line of sight at the zero distance. */
+  private readonly laserDir: Vector3;
+  private readonly laserLens: MeshBasicMaterial;
 
   constructor(private readonly app: App) {
     const g = this.group;
@@ -126,6 +133,9 @@ export class Bow {
       Bx(0.06, 0.035, 0.055, 0.026, RISER_END, 0.0, 0xd4af37), // limb pockets
       Bx(0.034, 0.035, 0.055, 0.004, -RISER_END, 0.0, 0xd4af37),
       Bx(0.012, 0.012, 0.125, 0.041, SCOPE_AT.y, -0.07, 0x2b2d42), // sight bar to the housing's side
+      // Laser module hung under the sight bar on a little bracket.
+      Bx(0.01, 0.012, 0.03, LASER_AT.x, LASER_AT.y + 0.0135, LASER_AT.z + 0.035, 0x2b2d42),
+      { geometry: new CylinderGeometry(0.0085, 0.0085, 0.06, 12), matrix: new Matrix4().makeRotationX(Math.PI / 2).setPosition(LASER_AT.x, LASER_AT.y, LASER_AT.z + 0.0305), color: 0x15161c },
     ]);
     this.riserMat = new MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.15, emissive: new Color(0) });
     const riser = new Mesh(riserGeo, this.riserMat);
@@ -165,6 +175,16 @@ export class Bow {
     this.scope.lens.position.z = 0.0345;
     housing.castShadow = true;
     this.scopeFrame.add(housing, ringRear, ringFront, this.scope.lens);
+
+    // The laser: a lens that glows while it's on, and the beam itself (in world space).
+    this.laserLens = new MeshBasicMaterial({ color: new Color(0.25, 0.02, 0.03), toneMapped: false });
+    const lens = new Mesh(new CircleGeometry(0.0055, 16), this.laserLens);
+    lens.position.copy(LASER_AT).z -= 0.0002;
+    lens.rotation.y = Math.PI;
+    g.add(lens);
+    const zeroPoint = new Vector3(0, -Math.sin(this.zero), -Math.cos(this.zero)).multiplyScalar(ZERO_DISTANCE).add(SCOPE_AT);
+    this.laserDir = zeroPoint.sub(LASER_AT).normalize();
+    this.laser = new BowLaser(app);
 
     // A translucent arrow that shows where to grab the string.
     this.ghost = new Mesh(new CylinderGeometry(0.004, 0.004, ARROW_LEN, 6), new MeshBasicMaterial({ color: 0x9fe3ff, transparent: true, opacity: 0.35, depthWrite: false }));
@@ -252,6 +272,7 @@ export class Bow {
       this.ghost.visible = false;
       return;
     }
+    if (bowHand.b.down) this.toggleLaser(bowHand);
     const other = this.app.input.other(bowHand);
     if (!other.connected || !other.grip.valid) {
       this.cancel();
@@ -261,6 +282,11 @@ export class Bow {
     this.pinchPoint(other, this.pinch);
     if (this.drawHand) {
       claimed.add(other);
+      return;
+    }
+    // That hand is busy with something else (the skyboat's wheel, a lever...).
+    if (claimed.has(other)) {
+      this.ghost.visible = false;
       return;
     }
     // Near the string (last frame's bow pose is close enough for this)?
@@ -392,8 +418,27 @@ export class Bow {
     m.scale.set(1, len, 1);
   }
 
+  /** B / Y on the bow hand. */
+  private toggleLaser(bowHand: HandInput): void {
+    setSetting('laser', !settings.laser);
+    laserClick(this.restWorld(new Vector3()), settings.laser);
+    bowHand.pulse(0.25, 15);
+    bus.emit('laser', { on: settings.laser });
+  }
+
+  /** Last thing each frame, once the bow and everything it might aim at are in place: laser, then scope. */
+  lateUpdate(dt: number, time: number): void {
+    this.group.updateMatrixWorld(true);
+    const origin = this.group.localToWorld(_v.copy(LASER_AT));
+    const dir = _v2.copy(this.laserDir).transformDirection(this.group.matrixWorld);
+    this.laser.update(dt, !!this.prop.heldBy && settings.laser, origin, dir, time);
+    const k = this.laser.level;
+    this.laserLens.color.setRGB(0.25 + 2.2 * k, 0.02 + 0.25 * k, 0.03 + 0.25 * k);
+    this.renderScope(time);
+  }
+
   /** Render the scope view for this frame (only when someone could be looking through it). */
-  renderScope(time: number): void {
+  private renderScope(time: number): void {
     const app = this.app;
     const head = app.headPosition(_v);
     const near = head.distanceTo(this.group.position) < 2.2 * app.rigScale;

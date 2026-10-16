@@ -12,6 +12,8 @@ export interface Settings {
   music: boolean;
   /** Prefer measured finger joints when the runtime offers them. */
   jointHands: boolean;
+  /** The bow's laser sight. */
+  laser: boolean;
 }
 
 const KEY = 'skyreach.settings.v1';
@@ -24,6 +26,7 @@ function load(): Settings {
     quality: flags.quality,
     music: true,
     jointHands: true,
+    laser: true,
   };
   try {
     const raw = localStorage.getItem(KEY);

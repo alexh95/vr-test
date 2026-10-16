@@ -14,7 +14,26 @@ export const LAYOUT = {
   pillar: new Vector3(-7.1, 0, 2.4),
   /** Archery deck on the west rim; you shoot toward -X (west), out over the clouds. */
   range: new Vector3(-6.9, 0, -0.5),
+  /** Root of the skyboat pier on the east rim. */
+  dock: new Vector3(7.2, 0, 0.9),
 };
+
+/**
+ * The pier runs east off the rim; the skyboat moors across its end, bow to the
+ * south (open sky), with its starboard gate against the pier.
+ */
+export const DOCK = {
+  pier: { x0: 6.7, x1: 11.4, z: 0.9, width: 1.5 },
+  /** Pier planks and the moored boat's deck are level. */
+  top: 0.12,
+  boat: new Vector3(12.8, 0.12, 1.8),
+  heading: Math.PI,
+};
+
+/** True on the pier's approach: keep it clear of trees and rocks. */
+export function inDockLane(x: number, z: number): boolean {
+  return x > 5.2 && Math.abs(z - DOCK.pier.z) < 1.9;
+}
 
 /** Eye position of someone standing on the archery deck's shooting line. */
 export const SHOOTER = new Vector3(-6.5, 1.75, -0.5);

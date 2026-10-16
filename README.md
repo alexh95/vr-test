@@ -3,8 +3,8 @@
 A floating island above a sea of clouds at sunset. Everything on it is there because it's better in VR than on a
 screen: grab and throw physics toys, **pull things to your hand with gravity gloves**, paint ribbons of light in
 the air, play a marimba, light a firework in your hand and hear the boom arrive late, flip gravity off, grow to
-giant size, walk the plank over a 40 m drop, and **shoot a two-handed bow with a 2Ã— scope** at targets floating
-(and flying) out over the clouds.
+giant size, walk the plank over a 40 m drop, **shoot a two-handed bow with a 2× scope and a laser sight** at
+targets floating (and flying) out over the clouds, and **take the helm of a flying boat** to sail between the islands.
 
 WebXR + three.js + Rapier, TypeScript, Vite. No assets: geometry, textures and sound are all generated in code.
 See [DECISIONS.md](DECISIONS.md) for why each piece was chosen.
@@ -67,6 +67,12 @@ The page switches to the **low** quality preset automatically when it detects a 
 
 ![The Sky Range at night](docs/range-night.jpg)
 
+| | |
+|---|---|
+| ![The skyboat Skylark moored at the pier on the east rim](docs/skyboat.jpg) | ![At the helm, flying back toward the island](docs/helm.jpg) |
+
+![The bow's laser sight at sunset and at night: bright at the bow, fading into the air](docs/laser.jpg)
+
 (Rendered from the emulated headset with `__vr.snapshot()`.)
 
 ## Controls
@@ -81,6 +87,10 @@ The page switches to the **low** quality preset automatically when it detects a 
 | **Left stick** | Walk (with a comfort vignette) |
 | **B / Y** while holding a brush | Undo the last stroke |
 | **Bow**: grip it with one hand, then bring the other hand to the string and squeeze (grip or trigger) | An arrow nocks. Draw back toward your cheek and let go to shoot |
+| **B / Y** on the hand holding the bow | Laser sight on / off |
+| **Skyboat helm**: grip the wheel's rim (one or both hands) and turn | Steer: the further you turn it, the faster she turns. Let go and it eases back to centre |
+| **Skyboat throttle** (red knob, right of the wheel): grip, push forward or pull back | Ahead / astern. It stays where you leave it and clicks into neutral in the middle |
+| **Skyboat lift** (blue handle, left of the wheel): grip, pull up or push down | Climb / sink. Let go and it springs back, holding your altitude |
 | **Turn your left palm toward your face** | Wrist menu: poke it with your right index finger (lift it off the trigger to point) or point and pull the trigger |
 
 ### Things to try
@@ -96,6 +106,7 @@ The page switches to the **low** quality preset automatically when it detects a 
 - **The plank**: straight ahead from where you start. Walk out to the end and look down.
 - **Stepping stones** to the satellite island: teleport from stone to stone.
 - **Sky Range** (the deck on the west rim, to your left from spawn): see below.
+- **The skyboat** (the pier on the east rim, to your right from spawn): see below.
 
 ### Sky Range (archery)
 Take the bow from its rack. Either hand can hold it; that hand aims. Bring your other hand to the string,
@@ -103,22 +114,45 @@ squeeze (grip or trigger), and draw back toward your face. While you draw, the b
 through the grip, so **both arms set the aim** as in real archery. Let go to shoot. A full draw sends the arrow
 at about 75 m/s. Arrows drop, so far targets need holdover.
 
-- **The scope** is a 2Ã— archery sight with an illuminated red dot, **zeroed at 35 m** at full draw. Closer
+- **The scope** is a 2× archery sight with an illuminated red dot, **zeroed at 35 m** at full draw. Closer
   targets hit a little high, farther ones low. It behaves like real optics: the picture sits at infinity, the dot
   stays on target wherever your eye is, and if your eye drifts off the scope's axis, a dark crescent of tube
   shadow creeps in until the view (and the dot) disappears. Anchor consistently and it lines up.
 - **Targets**: floating rocks at 12, 24 and 45 m, one standing on the west isle, a target **carried by
   balloons** sailing side to side, one riding a **cloud that orbits a crystal pylon**, and a **kite** looping a
-  figure-eight about 60 m out. Rings score 10/8/6/4/2. Moving targets score Ã—2, the kite Ã—3.
+  figure-eight about 60 m out. Rings score 10/8/6/4/2. Moving targets score ×2, the kite ×3.
   **Balloons** drifting up from the clouds pop for 5.
 - Hits are heard late from far away (sound at 343 m/s). Arrows stay stuck in what they hit, moving targets
   included, and knock props flying (try the tin cans). The scoreboard keeps your best score.
+- **The laser sight** under the scope throws a thin red beam that's bright at the bow and fades into the air
+  over a few tens of metres, with a dot wherever it lands (you see the dot through the scope too). It crosses the
+  scope's line of sight at 35 m, so dot, reticle and a full-draw arrow agree there. **B / Y** on the bow hand
+  switches it on or off (also in the wrist menu).
 - RESET on the console puts the bow back and starts a new round. Let go of the bow near its rack and it docks.
+
+### The skyboat
+The *Skylark* waits at the end of the pier on the east rim. Walk out along the pier and step aboard through the
+gate in her rail (or teleport onto the deck), then stand at the helm facing the bow:
+
+- **Wheel**: grab the rim with one or both hands and turn it (one and a half turns lock to lock). Turn left to
+  turn left. You can turn while stopped.
+- **Throttle** (right hand): push forward to go ahead, up to 6 m/s; pull back for astern. It stays put.
+- **Lift** (left hand): pull the handle up to climb, push it down to sink (2.5 m/s at the stops). It springs back
+  to the middle, so letting go holds your altitude.
+- **No pitch or roll**: the deck always stays level. You ride along with her: walk around the deck, turn, shoot
+  the bow from the rail, teleport onto her while she's moving and you land where you aimed.
+- The gauge over the wheel shows altitude, speed and heading. She bumps off islands rather than passing through
+  them; fly low onto an island and she runs aground and scrapes to a stop. Lift off and back away.
+- Everywhere is in range: the far islands now have walkable tops, so you can sail out and step off. She won't go
+  past 230 m from the island, above 60 m, or below 30 m under it.
+- **RESET** on the console (or *Reset toys* in the wrist menu) sends her back to the pier, with you aboard if
+  you're on the deck. If turning the wheel at the pier does nothing, she's touching the pier: throttle forward
+  first.
 
 ### Wrist menu
 **Settings**: turning (snap 45° / snap 30° / smooth), left stick (walk / teleport), vignette, quality, music,
-fingers (driven by controller touch, or by measured joints if SteamVR provides them), plus Recenter · Clear paint ·
-Reset toys.
+fingers (driven by controller touch, or by measured joints if SteamVR provides them), bow laser, plus Recenter ·
+Clear paint · Reset toys.
 **Info**: live fps, draw calls, framebuffer size, refresh rates, input profiles, and whether your setup exposes
 haptics, capacitive touch and finger joints.
 
@@ -142,6 +176,9 @@ first session, check these and note anything that's off:
 - [ ] **Bow**: nocking with the other hand is easy, the draw feels right, and the arrow flies where the bow points.
       Does the scope's red dot appear when you anchor? (If your eye can't find it, tell me roughly where your
       draw hand anchors and I'll move the sight.)
+- [ ] **Laser**: is the beam visible enough at sunset and at night (and not too much)? Does B/Y on the bow hand toggle it?
+- [ ] **Skyboat**: boarding through the gate, grabbing the wheel, throttle and lift handle feel natural; the boat's
+      turning is comfortable (with and without the vignette); you can teleport onto her while she's moving.
 
 ---
 
@@ -151,7 +188,7 @@ first session, check these and note anything that's off:
 |---|---|
 | `/?emulate` | An emulated headset ([IWER](https://github.com/meta-quest/immersive-web-emulation-runtime), shaped like the Frame as Chrome sees it). Press Enter VR in any browser |
 | `/?emulate&devui` | The same, plus IWER's DevUI to drive the head and controllers with mouse and keyboard |
-| `/?emulate&selftest` | Runs the **27-check scripted playtest** and logs one JSON line per check (`[selftest] {...}`). Results are also in `window.__selftest` |
+| `/?emulate&selftest` | Runs the **33-check scripted playtest** and logs one JSON line per check (`[selftest] {...}`). Results are also in `window.__selftest` |
 | `/?emulate&selftest=teleport,gravity-gloves` | Only those checks |
 | `/?emulate&autostart` | Enters the emulated session on load |
 
@@ -199,7 +236,8 @@ src/
   physics/           Rapier wrapper: fixed step, interpolation, impact events, respawn, zero-G
   interact/          grab/throw/swat, gravity gloves, locomotion (teleport, turn, walk, vignette)
   toys/              table & cans & orbs, light brushes, marimba, fireworks, control console
-  archery/           bow (two-handed draw), scope (picture-in-picture lens shader), arrows, Sky Range targets
+  archery/           bow (two-handed draw), scope (picture-in-picture lens shader), laser sight, arrows, Sky Range targets
+  skyboat/           the flying boat: hull/helm model, pier, flight + collisions + carrying the player
   world/             sky, time of day, clouds, islands, scenery, fireflies, play area, layout
   audio/             Web Audio engine, synthesized SFX, ambience + generative pad
   fx/particles.ts    one-draw-call particle system
@@ -210,13 +248,18 @@ tools/contact-sheet.py
 
 ## Status
 
-**Verified** (Chromium in an emulated headset, dev server and production build): all 27 self-test checks pass,
+**Verified** (Chromium in an emulated headset, dev server and production build): all 33 self-test checks pass,
 there are no frame errors, and the visuals were reviewed from snapshots of every station, the hands in four poses
-(both sides), sunset and night, fireworks, the teleport arc, the bow at rest and at full draw, and the scope from
-aligned and off-axis eye positions. The archery checks include a ballistic one: with the red dot on a point 35 m
-away, the arrow lands within 5 cm of it. Also checked: the HTTPS mode serves correctly.
+(both sides), sunset and night, fireworks, the teleport arc, the bow at rest and at full draw, the scope from
+aligned and off-axis eye positions, the laser at sunset and night, and the skyboat at the pier, from the helm and
+in flight. The archery checks include a ballistic one: with the red dot on a point 35 m away, the arrow lands
+within 5 cm of it. The skyboat checks fly her with the throttle, wheel and lift handle driven by the emulated
+hands and measure that the player doesn't slide on the deck (0 mm), that she stops at a cliff (3 cm gap), and
+that teleporting onto her while she moves lands within 3 cm of the aimed spot. Also checked: the HTTPS mode
+serves correctly.
 
-**Tested by you on a Steam Frame** (PC streaming): the first version (everything before the Sky Range).
+**Tested by you on a Steam Frame** (PC streaming): the first version, then the Sky Range (you reported the
+thumbs and the target z-fighting; both fixed). The laser and the skyboat are new and untested on hardware.
 
 **Not verified:** anything on real hardware, meaning a real SteamVR + Chrome session, the Frame's actual
 haptics/touch/joint reporting, the standalone community browser, comfort and feel. That's the checklist above.

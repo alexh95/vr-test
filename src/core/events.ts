@@ -32,7 +32,12 @@ export type EventName =
   | 'arrow-shot'
   | 'arrow-hit'
   | 'target-hit'
-  | 'balloon-pop';
+  | 'balloon-pop'
+  | 'laser'
+  | 'boat-grab'
+  | 'boat-board'
+  | 'boat-leave'
+  | 'boat-bump';
 
 export interface BusEvent {
   name: EventName;

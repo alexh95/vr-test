@@ -28,6 +28,9 @@ export interface Island {
   /** Collider data for the walkable top, in world space. */
   topVertices: Float32Array;
   topIndices: Uint32Array;
+  /** Collider data for the rock underside (the same surface that's drawn), in world space. */
+  rockVertices: Float32Array;
+  rockIndices: Uint32Array;
 }
 
 const grassMat = new MeshLambertMaterial({ vertexColors: true });
@@ -179,6 +182,23 @@ export function buildIsland(spec: IslandSpec): Island {
   }
   const topIndices = new Uint32Array(ti);
 
+  // World-space collider for the rock underside: ring 0 is the rim, so it meets the top.
+  const cx = spec.center.x;
+  const cy = spec.center.y;
+  const cz = spec.center.z;
+  const rockVertices = new Float32Array((NU * M + 1) * 3);
+  rings.forEach((r, k) => r.forEach((p, j) => rockVertices.set([p.x + cx, p.y + cy, p.z + cz], (k * M + j) * 3)));
+  rockVertices.set([tip.x + cx, tip.y + cy, tip.z + cz], NU * M * 3);
+  const ri: number[] = [];
+  for (let k = 0; k < NU - 1; k++) {
+    for (let j = 0; j < M; j++) {
+      const j1 = (j + 1) % M;
+      ri.push(k * M + j, k * M + j1, (k + 1) * M + j, k * M + j1, (k + 1) * M + j1, (k + 1) * M + j);
+    }
+  }
+  for (let j = 0; j < M; j++) ri.push((NU - 1) * M + j, (NU - 1) * M + ((j + 1) % M), NU * M);
+  const rockIndices = new Uint32Array(ri);
+
   const heightAt = (x: number, z: number) => {
     const lx = x - spec.center.x;
     const lz = z - spec.center.z;
@@ -197,5 +217,7 @@ export function buildIsland(spec: IslandSpec): Island {
     heightAt,
     topVertices,
     topIndices,
+    rockVertices,
+    rockIndices,
   };
 }

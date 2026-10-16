@@ -35,8 +35,10 @@ import { TargetRange } from './archery/targets';
 import { ArrowSystem } from './archery/arrows';
 import { Bow } from './archery/bow';
 import { EYES_ONLY_LAYER } from './archery/scope';
+import { SkyBoat } from './skyboat/skyboat';
 
 const GIANT_SCALE = 8;
+const _follow = new Vector3();
 
 export class App {
   readonly renderer: WebGLRenderer;
@@ -74,6 +76,7 @@ export class App {
   range!: TargetRange;
   arrows!: ArrowSystem;
   bow!: Bow;
+  boat!: SkyBoat;
   readonly ambience = new Ambience();
   private orbit!: OrbitControls;
   private readonly shadowTarget = new Object3D();
@@ -171,13 +174,18 @@ export class App {
     this.range = new TargetRange(this);
     this.arrows = new ArrowSystem(this);
     this.bow = new Bow(this);
-    this.physics.beforeStep = () => this.grab.beforeStep();
+    this.boat = new SkyBoat(this);
+    this.physics.beforeStep = (_dt, ahead) => {
+      this.grab.beforeStep();
+      this.boat.beforeStep(ahead);
+    };
 
     this.tod.onChange((p) => {
       this.clouds.applyPreset(p);
       this.scenery.crystalMaterial.color.setScalar(p.glow);
       this.toys.setGlow(p.glow);
       this.range.setGlow(p.glow);
+      this.boat.setGlow(p.glow);
       this.bow.scope.setLook(p.zenith, p.horizon, p.skySunDir, p.glow);
       this.ambience.setMood(p.night);
     });
@@ -200,6 +208,7 @@ export class App {
     };
     this.xr.onEnd = () => {
       this.bow.cancel();
+      this.boat.releaseControls();
       this.grab.releaseAll();
       this.input.clear();
       this.locomotion.reset();
@@ -285,6 +294,8 @@ export class App {
     }
     this.updateScale(dt);
     this.updateRig();
+    // The skyboat flies first and carries you, so everything below sees hands where they are.
+    if (this.boat.update(dt)) this.updateRig();
 
     const busy = new Set<HandInput>();
     const claimed = new Set<HandInput>();
@@ -293,6 +304,7 @@ export class App {
       if (this.wristMenu.engaged) busy.add(this.input.right);
       if (this.locomotion.update(dt, busy)) this.updateRig();
       this.console.update(dt, claimed);
+      this.boat.controls(claimed);
       this.bow.preUpdate(claimed);
       for (const h of claimed) busy.add(h);
       this.grab.update(dt, claimed);
@@ -317,6 +329,9 @@ export class App {
     }
 
     this.fx.update(dt);
+    // Shadows follow the player: the boat can take you far from the island.
+    if (inXR) this.tod.follow(this.headPosition(_follow).setY(this.rig.position.y - this.floorOffset * this.rigScale));
+    else this.tod.follow(this.orbit.target);
     this.tod.update(dt);
     this.fireflies.update(this.time, this.tod.night);
     this.sky.update(this.camera, this.time);
@@ -325,7 +340,7 @@ export class App {
     if (!inXR) this.orbit.update();
     audio.updateListener(this.camera);
     // Last: the bow and the player's head are where they'll be drawn this frame.
-    this.bow.renderScope(this.time);
+    this.bow.lateUpdate(dt, this.time);
     this.onFrame?.(dt);
   }
 
@@ -395,6 +410,7 @@ export class App {
     this.bow.dock();
     this.arrows.clear();
     this.range.resetScore();
+    this.boat.reset();
   }
 
   applyQuality(): void {

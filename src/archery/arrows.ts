@@ -150,11 +150,10 @@ export class ArrowSystem {
       let worldT = Infinity;
       let worldCollider: RAPIER.Collider | null = null;
       if (len > 1e-5) {
-        const ray = new RAPIER.Ray(_tip0, { x: _seg.x / len, y: _seg.y / len, z: _seg.z / len });
-        const flags = RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC | (a.state === 'falling' ? RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC : 0);
-        const hit = physics.world.castRay(ray, len, true, flags);
+        // World geometry (the moving skyboat included) and free props; never the bow or hands.
+        const hit = physics.castSolid(_tip0, _seg.clone().multiplyScalar(1 / len), len, a.state === 'flying');
         if (hit) {
-          worldT = hit.timeOfImpact / len;
+          worldT = hit.dist / len;
           worldCollider = hit.collider;
         }
       }
@@ -187,6 +186,8 @@ export class ArrowSystem {
         }
         const info = physics.staticInfo.get(worldCollider.handle);
         this.stick(a, point, dir1, a.state === 'flying' ? 0.06 : 0.01);
+        // Stuck in something that moves (the skyboat): ride along with it.
+        info?.platform?.attach(a.mesh);
         impact(point, info?.material ?? 'wood', Math.min(1, speed / 50));
         if (a.state === 'flying') bus.emit('arrow-hit', { what: info?.walkable ? 'ground' : 'scenery', distance: +point.distanceTo(a.from).toFixed(1) });
         continue;

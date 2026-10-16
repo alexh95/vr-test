@@ -8,6 +8,7 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  type Object3D,
   Quaternion,
   ShaderMaterial,
   SphereGeometry,
@@ -54,6 +55,8 @@ export class Locomotion {
   private aimHand: HandInput | null = null;
   private arcValid = false;
   private readonly arcTarget = new Vector3();
+  /** The moving platform (the skyboat) the arc landed on, if any. */
+  private arcPlatform: Object3D | null = null;
   private readonly arcPoints: Vector3[] = [];
   private readonly dots: InstancedMesh;
   private readonly ring: Mesh;
@@ -64,12 +67,16 @@ export class Locomotion {
   private fade = 0;
   private fadeDir = 0;
   private pending: Vector3 | null = null;
+  /** A pending landing on a moving platform is kept in its frame, so you land where you aimed. */
+  private pendingPlatform: Object3D | null = null;
   private onFaded: (() => void) | null = null;
   private vignette = 0;
   private readonly validColor = new Color(0x9ff3ff);
   private readonly invalidColor = new Color(0xff6b5e);
   /** Ground height under the player while walking (smoothed). */
   moving = false;
+  /** Comfort vignette requested by something else this frame (the skyboat turning). */
+  extraVignette = 0;
 
   constructor(private readonly app: App) {
     const dotMat = new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, toneMapped: false });
@@ -115,8 +122,8 @@ export class Locomotion {
     return this.aimHand;
   }
 
-  get target(): { valid: boolean; point: Vector3 } {
-    return { valid: this.arcValid, point: this.arcTarget };
+  get target(): { valid: boolean; point: Vector3; platform: Object3D | null } {
+    return { valid: this.arcValid, point: this.arcTarget, platform: this.arcPlatform };
   }
 
   /** Returns true if the rig moved this frame. Adds hands busy aiming to `busy`. */
@@ -140,7 +147,7 @@ export class Locomotion {
       const h = this.aimHand;
       busy.add(h);
       if (releasedAim(h)) {
-        if (this.arcValid && h.connected) this.teleportTo(this.arcTarget.clone());
+        if (this.arcValid && h.connected) this.teleportTo(this.arcTarget.clone(), this.arcPlatform);
         this.aimHand = null;
         this.hideArc();
       } else this.computeArc(h);
@@ -188,7 +195,7 @@ export class Locomotion {
     this.moving = speedFactor > 0;
 
     // ---- Comfort overlay ----
-    const vTarget = settings.vignette ? clamp(speedFactor, 0, 1) * 0.85 : 0;
+    const vTarget = settings.vignette ? Math.max(clamp(speedFactor, 0, 1) * 0.85, this.extraVignette) : 0;
     this.vignette += (vTarget - this.vignette) * damp(vTarget > this.vignette ? 12 : 5, dt);
     this.updateFade(dt);
     this.overlayUniforms.uVignette.value = this.vignette;
@@ -202,8 +209,10 @@ export class Locomotion {
       this.fade = Math.min(1, this.fade + dt / 0.075);
       if (this.fade >= 1) {
         if (this.pending) {
-          this.applyTeleport(this.pending);
+          // The platform kept moving during the blink: land on the spot that was aimed at.
+          this.applyTeleport(this.pendingPlatform ? this.pendingPlatform.localToWorld(this.pending) : this.pending);
           this.pending = null;
+          this.pendingPlatform = null;
         }
         this.onFaded?.();
         this.onFaded = null;
@@ -221,9 +230,10 @@ export class Locomotion {
     this.fadeDir = 1;
   }
 
-  /** Move so that the head ends up above `ground`. */
-  teleportTo(ground: Vector3): void {
-    this.pending = ground;
+  /** Move so that the head ends up above `ground` (on `platform`, if it's on something that moves). */
+  teleportTo(ground: Vector3, platform: Object3D | null = null): void {
+    this.pending = platform ? platform.worldToLocal(ground.clone()) : ground;
+    this.pendingPlatform = platform;
     this.fadeDir = 1;
     teleportSound(null);
     bus.emit('teleport', { x: +ground.x.toFixed(2), y: +ground.y.toFixed(2), z: +ground.z.toFixed(2) });
@@ -293,6 +303,7 @@ export class Locomotion {
     let n = 0;
     this.arcPoints[n++].copy(p);
     this.arcValid = false;
+    this.arcPlatform = null;
     let hitPoint: Vector3 | null = null;
     for (let i = 0; i < 150 && n < this.arcPoints.length; i++) {
       const next = _v2.set(p.x + vel.x * dt, p.y + vel.y * dt + 0.5 * g * dt * dt, p.z + vel.z * dt);
@@ -304,6 +315,7 @@ export class Locomotion {
         this.arcPoints[n++].copy(hit.point);
         hitPoint = hit.point;
         this.arcValid = hit.walkable && hit.normal.y > tuning.teleportMaxNormalTilt;
+        this.arcPlatform = hit.platform;
         break;
       }
       p.copy(next);
@@ -352,6 +364,7 @@ export class Locomotion {
   private hideArc(): void {
     this.dots.visible = this.ring.visible = this.beam.visible = false;
     this.arcValid = false;
+    this.arcPlatform = null;
   }
 
   /** Cancel an in-progress aim (session end). */
@@ -361,6 +374,8 @@ export class Locomotion {
     this.fade = 0;
     this.fadeDir = 0;
     this.pending = null;
+    this.pendingPlatform = null;
+    this.extraVignette = 0;
     this.overlay.visible = false;
   }
 }

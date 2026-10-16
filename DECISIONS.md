@@ -110,7 +110,7 @@ Same philosophy as `game-test`: a mechanical verification ladder the agent can r
 | Tool | What it does |
 |---|---|
 | `?emulate` | Installs **IWER** (Meta's WebXR emulation runtime) shaped like the Frame as Chrome sees it (Touch profile, 72–144 Hz, floor space). Any desktop browser can "enter VR" |
-| `?emulate&selftest` | **27 scripted playtest checks** (21 at first, 6 archery since): grab and throw, teleport (and refusing the abyss), snap and smooth turn, walking, gravity gloves, painting, marimba by finger and by thrown ball, fireworks from the hand, console buttons (ray and poke), the gravity lever (things float), wrist menu (ray and poke), giant mode, tracked hands, and no frame errors. One JSON line per check. Runs against the dev server and the production build |
+| `?emulate&selftest` | **33 scripted playtest checks** (21 at first, then 6 archery, 1 laser, 5 skyboat): grab and throw, teleport (and refusing the abyss), snap and smooth turn, walking, gravity gloves, painting, marimba by finger and by thrown ball, fireworks from the hand, console buttons (ray and poke), the gravity lever (things float), wrist menu (ray and poke), giant mode, tracked hands, and no frame errors. One JSON line per check. Runs against the dev server and the production build |
 | `window.__vr` | Probe: `state()`, `events()`, `prop(id)`, `snapshot(name)` |
 | `window.__driver` | Moves the emulated head and controllers in **world** coordinates, presses buttons, sweeps hands along paths at real frame rate |
 | `__vr.snapshot()` | Renders the player's view offscreen and posts it to the dev server → `.snapshots/<name>.png` (works while the page is hidden) |
@@ -167,6 +167,72 @@ arrow can't tunnel. Arrows parent to whatever they stick in, so they ride the mo
 bullseyes on floating rocks, a balloon-carried target, one riding an orbiting cloud, and a kite, with
 sun-to-twilight ring colours.
 
-## 14. Deliberately out of scope (for now)
+## 14. The skyboat (added 2026-10-16)
+
+You asked for a flying boat with a proper helm and elevation controls, yaw and height only.
+
+**Controls you hold, not sticks.** A wheel, a throttle lever and a lift handle, all grabbed with grip:
+- **Wheel**: the angle of each hand around the hub is tracked frame to frame and the wheel turns by the average
+  change, so one hand or two hand-over-hand both work. One and a half turns lock to lock, the wheel angle sets
+  the **turn rate** (up to 18°/s), it self-centres when released, and it ratchets with a click and a haptic tick
+  every 15°.
+- **Throttle**: a lever that stays where you leave it, with a neutral detent (like a ship's telegraph), so you can
+  let go and keep cruising.
+- **Lift**: a handle that slides up and down a post and springs back to the middle. Up climbs, down sinks;
+  letting go holds altitude, so you can't drift into the cloud sea by forgetting a control. Considered: a second
+  lever, but which way is "up" on a tilting lever is ambiguous, and a handle that moves the way the boat moves
+  needs no explanation.
+- Considered: thumbsticks. They're faster to learn but the request was a helm, and a physical control means you
+  cause every motion, which also keeps it comfortable.
+
+**Comfort.** The deck never pitches or rolls (your call, and the comfortable one: the horizon never tilts),
+motion is eased (no instant accelerations), speeds are gentle (6 m/s ahead, 2.5 m/s climb), and the comfort
+vignette, if it's on, closes a little only while she's turning, which is the motion most likely to bother people.
+You also see the deck, rails and wheel around you, a fixed frame of reference.
+
+**Riding along: the boat moves first.** At the very start of each frame, before anything reads the hands, the
+boat integrates its motion and moves the player's rig by the same yaw and translation. Then everything else
+(hands, the grab system, a bow in your hand, the controls themselves) sees consistent poses. The tests measure
+0 mm of drift of the head on the deck while flying, turning and climbing. Considered: moving the boat inside the
+physics step, which would leave a held bow trailing the hand by one frame (about 7 cm at full speed); and
+parenting the rig to the boat, which would complicate every world-space calculation in the input code.
+
+**Physics.** The boat is a kinematic Rapier body carrying the deck, bulwarks, binnacle, pedestals and envelope
+as colliders, so balls roll on the deck, arrows stick in her and ride along, and teleport arcs land on her. The
+body leads its drawn pose by one physics step, because props are drawn interpolated one step behind; that way a
+ball on the deck is drawn exactly on the deck. Teleporting onto her stores the landing point in her frame, so
+you land where you aimed even though she moved during the blink (within 3 cm in the tests). Once aboard you stay aboard
+until you clearly leave (walk well away from her, or teleport off), so leaning over the rail never drops you.
+
+**Collisions.** Every move is a shape cast of the hull and the envelope against the static world; she stops
+3 cm short, slides along walls, and refuses a yaw that would swing the hull into something. Scraping over an
+island's grass adds drag, so she runs aground rather than sledding across the island. Building this exposed a
+gap: the islands' undersides used a cone collider that sat up to 3 m inside the drawn rock, so every island now
+also has its rock surface as an exact collider (cheap, and props bounce off the right place now too). The far
+islands got collidable, walkable tops so you can sail out and step off.
+
+**Other details.** The pier is on the east rim with the boat moored across its end, bow to open sky, so leaving
+needs no maneuvering (throttle ahead first: turning at the pier bumps her into it). The shadow map now follows
+the player, snapped to whole texels so edges don't crawl, since the boat can take you away from the island. The
+engine is one continuous synthesized voice whose pitch, filter and chug follow the load, plus rushing air for
+the crew. She's about 22 draw calls per eye after merging.
+
+## 15. The laser sight (added 2026-10-16)
+
+- **What "fading" means here**: the beam is brightest at the bow and fades exponentially with distance (about
+  14 m to 1/e), the way a laser shows in thin haze, with a little drifting-dust shimmer. The dot where it lands
+  stays crisp. If you meant a beam that fades away after each shot, that's a small change.
+- **Zeroed with the scope**: the emitter sits under the sight bar and its beam crosses the scope's line of sight
+  at the same 35 m, so dot, reticle and a full-draw arrow agree there (checked to the millimetre).
+- **Drawn per eye**: the beam is a ribbon turned to face each eye in the vertex shader, never thinner than a
+  couple of headset pixels (and dimmer as it widens, so far away it doesn't turn into a bar). It's on the
+  eyes-only layer, so the scope doesn't render it; the dot is ordinary geometry, so the scope shows it.
+- **Blending**: pure additive red vanished against the pink sunset sky (the red channel is already nearly full;
+  caught in a snapshot). The beam and dot use premultiplied blending instead: they add red light *and* cover a
+  little of what's behind them, so they read by day and glow at night.
+- **Toggle**: B/Y on the bow hand (the brush already uses B/Y for undo, so it means "the tool's own button"),
+  also in the wrist menu; it's remembered. It fades in when you pick up the bow.
+
+## 16. Deliberately out of scope (for now)
 
 Multiplayer, passthrough / `immersive-ar` (the Frame's passthrough is monochrome and not exposed to WebXR), WebXR Layers (not supported by the community Frame build), eye tracking (not in WebXR), asset pipelines, and saving paintings.

@@ -4,6 +4,10 @@ import type { Sky } from './sky';
 
 export type TimeName = 'sunset' | 'night' | 'day';
 
+const _up = new Vector3(0, 1, 0);
+const _fx = new Vector3();
+const _fy = new Vector3();
+
 interface Preset {
   zenith: Color;
   horizon: Color;
@@ -166,6 +170,22 @@ export class TimeOfDay {
     const n = TIME_ORDER[(i + 1) % TIME_ORDER.length];
     this.set(n);
     return n;
+  }
+
+  /** Centre the shadow map on `p`, snapped to whole shadow texels so edges don't crawl as it moves. */
+  follow(p: Vector3): void {
+    const cam = this.key.shadow.camera;
+    const texel = (cam.right - cam.left) / this.key.shadow.mapSize.x;
+    const dir = this.current.sunDir;
+    // The shadow camera's own axes (it looks from the light at the target, +Y up).
+    const x = _fx.crossVectors(_up, dir);
+    if (x.lengthSq() < 1e-6) x.set(1, 0, 0);
+    x.normalize();
+    const y = _fy.crossVectors(dir, x);
+    const t = this.key.target.position;
+    t.copy(x).multiplyScalar(Math.round(p.dot(x) / texel) * texel);
+    t.addScaledVector(y, Math.round(p.dot(y) / texel) * texel).addScaledVector(dir, p.dot(dir));
+    this.key.position.copy(t).addScaledVector(dir, 40);
   }
 
   onChange(fn: (p: Readonly<Preset>) => void): void {

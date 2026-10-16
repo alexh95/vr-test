@@ -1,5 +1,5 @@
 import type { Vector3 } from 'three';
-import { audio } from './audio';
+import { audio, setPannerPosition } from './audio';
 
 // Synthesized sound effects. Each recipe allocates one spatial voice and
 // schedules oscillators/noise into it. Kept deliberately small: a few partials
@@ -305,4 +305,110 @@ export function balloonPop(at: Vector3, distance: number): void {
   if (!v) return;
   noiseBurst(v.input, v.t0, 'highpass', 1800, 0.7, 1, 0.001, 0.05);
   tone(v.input, v.t0, 'sine', 140, 0.6, 0.001, 0.07, 60);
+}
+
+/** A dry click: the laser sight switching on or off. */
+export function laserClick(at: Vector3, on: boolean): void {
+  const v = audio.voice({ at, life: 0.12, gain: 0.3 });
+  if (!v) return;
+  tone(v.input, v.t0, 'square', on ? 2400 : 1700, 0.2, 0.001, 0.02);
+  tone(v.input, v.t0 + 0.03, 'sine', on ? 3200 : 1300, 0.35, 0.002, 0.05);
+}
+
+// ---- Skyboat ----
+
+/** One notch of the helm wheel's ratchet. */
+export function wheelTick(at: Vector3): void {
+  const v = audio.voice({ at, life: 0.08, gain: 0.22 });
+  if (!v) return;
+  noiseBurst(v.input, v.t0, 'bandpass', 1900, 4, 0.9, 0.001, 0.03);
+  tone(v.input, v.t0, 'triangle', 520, 0.3, 0.001, 0.03);
+}
+
+/** The hull bumping into rock or wood: a deep thud with a creak on top. */
+export function boatBump(at: Vector3, strength: number): void {
+  const s = Math.min(1, Math.max(0.1, strength));
+  const v = audio.voice({ at, life: 0.7, wet: 0.25, gain: 0.35 + 0.55 * s, ref: 3 });
+  if (!v) return;
+  tone(v.input, v.t0, 'sine', 95, 1, 0.004, 0.45, 48);
+  noiseBurst(v.input, v.t0, 'lowpass', 900, 0.7, 0.8, 0.003, 0.25, 200);
+  noiseBurst(v.input, v.t0 + 0.05, 'bandpass', 420, 8, 0.35 * s, 0.01, 0.25);
+}
+
+/** The engine catching: a cough, then the drone rising. */
+export function engineStart(at: Vector3): void {
+  const v = audio.voice({ at, life: 1.1, wet: 0.15, gain: 0.45, ref: 3 });
+  if (!v) return;
+  noiseBurst(v.input, v.t0, 'lowpass', 500, 0.8, 0.9, 0.005, 0.12);
+  noiseBurst(v.input, v.t0 + 0.22, 'lowpass', 650, 0.8, 0.8, 0.005, 0.14);
+  tone(v.input, v.t0 + 0.3, 'sawtooth', 24, 0.5, 0.25, 0.55, 46);
+}
+
+export interface EngineLoop {
+  /** `load` 0..1 (how hard it works); `wind` 0..1 is rushing air, heard only by the crew. */
+  update(at: Vector3, load: number, running: boolean, wind: number): void;
+}
+
+/**
+ * The skyboat's engine as a continuous voice: a low two-oscillator drone with a
+ * propeller chug, filtered brighter as it works harder, plus head-locked wind.
+ */
+export function engineLoop(): EngineLoop | null {
+  const ctx = audio.ctx;
+  const out = audio.sfxInput;
+  if (!ctx || !out || ctx.state !== 'running') return null;
+  const t = ctx.currentTime;
+  const panner = ctx.createPanner();
+  panner.panningModel = 'HRTF';
+  panner.distanceModel = 'inverse';
+  panner.refDistance = 2.5;
+  panner.maxDistance = 10000;
+  const level = ctx.createGain();
+  level.gain.value = 0;
+  const throb = ctx.createGain();
+  throb.gain.value = 0.75;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 300;
+  lp.Q.value = 0.8;
+  const o1 = ctx.createOscillator();
+  o1.type = 'sawtooth';
+  o1.frequency.value = 42;
+  const o2 = ctx.createOscillator();
+  o2.type = 'triangle';
+  o2.frequency.value = 63;
+  const o2g = ctx.createGain();
+  o2g.gain.value = 0.6;
+  const chug = ctx.createOscillator();
+  chug.frequency.value = 5;
+  const chugDepth = ctx.createGain();
+  chugDepth.gain.value = 0.25;
+  chug.connect(chugDepth).connect(throb.gain);
+  o1.connect(lp);
+  o2.connect(o2g).connect(lp);
+  lp.connect(throb).connect(level).connect(panner).connect(out);
+  const air = audio.noiseSource(t, 1);
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 700;
+  bp.Q.value = 0.6;
+  const airGain = ctx.createGain();
+  airGain.gain.value = 0;
+  air.connect(bp).connect(airGain).connect(out);
+  for (const o of [o1, o2, chug]) o.start(t);
+  return {
+    update(at, load, running, wind) {
+      const now = ctx.currentTime;
+      setPannerPosition(panner, at);
+      const l = Math.min(1, Math.max(0, load));
+      const f = 40 + 34 * l;
+      o1.frequency.setTargetAtTime(f, now, 0.3);
+      o2.frequency.setTargetAtTime(f * 1.5, now, 0.3);
+      chug.frequency.setTargetAtTime(4 + 11 * l, now, 0.3);
+      lp.frequency.setTargetAtTime(260 + 1000 * l, now, 0.3);
+      level.gain.setTargetAtTime(running ? 0.1 + 0.24 * l : 0, now, running ? 0.35 : 0.8);
+      airGain.gain.setTargetAtTime(0.13 * wind * wind, now, 0.4);
+      bp.frequency.setTargetAtTime(500 + 900 * wind, now, 0.4);
+    },
+  };
 }

@@ -17,7 +17,7 @@ import {
 import { RAPIER, type Physics } from '../physics/physics';
 import { rng, TAU } from '../core/math';
 import { buildIsland, type Island, type IslandSpec } from './island';
-import { inRangeLane, nearStation } from './layout';
+import { inDockLane, inRangeLane, nearStation } from './layout';
 import { mergeStatic } from '../core/merge';
 
 export interface Scenery {
@@ -42,14 +42,14 @@ export function buildScenery(physics: Physics, quality: 'high' | 'low'): Scenery
   root.name = 'scenery';
   const islands: Island[] = [];
 
-  const add = (spec: IslandSpec, walkable: boolean) => {
+  const add = (spec: IslandSpec, walkable = true) => {
     const isl = buildIsland(spec);
     root.add(isl.group);
     islands.push(isl);
-    if (walkable) {
-      physics.addStatic(RAPIER.ColliderDesc.trimesh(isl.topVertices, isl.topIndices), { walkable: true, material: 'stone' });
-    }
-    // A coarse rock collider so things bounce off the underside instead of falling through it.
+    physics.addStatic(RAPIER.ColliderDesc.trimesh(isl.topVertices, isl.topIndices), { walkable, material: 'stone' });
+    // The rock underside exactly as drawn (the skyboat can fly right up to it), plus a
+    // solid core so fast things can't slip inside.
+    physics.addStatic(RAPIER.ColliderDesc.trimesh(isl.rockVertices, isl.rockIndices), { walkable: false, material: 'stone' });
     const s = spec;
     physics.addStatic(
       RAPIER.ColliderDesc.cone(s.depth * 0.45, s.radius * 0.8),
@@ -60,7 +60,7 @@ export function buildScenery(physics: Physics, quality: 'high' | 'low'): Scenery
     return isl;
   };
 
-  const main = add({ name: 'main-island', center: new Vector3(0, 0, 0), radius: 9.2, depth: 15, seed: 1, flat: 0.68, bump: 0.32, ragged: 0.18 }, true);
+  const main = add({ name: 'main-island', center: new Vector3(0, 0, 0), radius: 9.2, depth: 15, seed: 1, flat: 0.68, bump: 0.32, ragged: 0.18 });
 
   // Stepping stones toward the satellite island (front-right).
   const satelliteCenter = new Vector3(12.8, 1.1, -12.6);
@@ -74,12 +74,12 @@ export function buildScenery(physics: Physics, quality: 'high' | 'low'): Scenery
     p.x += (i % 2 === 0 ? 0.5 : -0.4);
     p.y = 0.15 + t * 0.9;
     stonePositions.push(p);
-    add({ name: `stone-${i}`, center: p, radius: 0.85, depth: 2.2, seed: 10 + i, flat: 0.75, bump: 0.05, ragged: 0.3, segments: 18, rings: 3, grass: [0x6c9b4a, 0x8cb95a] }, true);
+    add({ name: `stone-${i}`, center: p, radius: 0.85, depth: 2.2, seed: 10 + i, flat: 0.75, bump: 0.05, ragged: 0.3, segments: 18, rings: 3, grass: [0x6c9b4a, 0x8cb95a] });
   }
-  add({ name: 'satellite', center: satelliteCenter, radius: 3.6, depth: 7, seed: 2, flat: 0.55, bump: 0.25, ragged: 0.3, segments: 48, rings: 6 }, true);
+  add({ name: 'satellite', center: satelliteCenter, radius: 3.6, depth: 7, seed: 2, flat: 0.55, bump: 0.25, ragged: 0.3, segments: 48, rings: 6 });
 
-  // Big neighbours you can see but not reach (unless you're a giant).
-  add({ name: 'west-isle', center: new Vector3(-24, -3.5, -19), radius: 5.2, depth: 9, seed: 3, flat: 0.4, bump: 0.6, ragged: 0.35, segments: 48, rings: 6 }, true);
+  // Big neighbours: too far to teleport to, but the skyboat (or a giant) can get there.
+  add({ name: 'west-isle', center: new Vector3(-24, -3.5, -19), radius: 5.2, depth: 9, seed: 3, flat: 0.4, bump: 0.6, ragged: 0.35, segments: 48, rings: 6 });
   const far: [number, number, number, number, number][] = [
     [44, 9, -72, 8, 4],
     [-66, 16, 28, 10, 5],
@@ -88,7 +88,7 @@ export function buildScenery(physics: Physics, quality: 'high' | 'low'): Scenery
     [12, -18, 60, 9, 8],
   ];
   for (const [x, y, z, r, seed] of far) {
-    add({ name: `far-${seed}`, center: new Vector3(x, y, z), radius: r, depth: r * 1.8, seed, flat: 0.3, bump: 1.2, ragged: 0.35, segments: 40, rings: 5 }, false);
+    add({ name: `far-${seed}`, center: new Vector3(x, y, z), radius: r, depth: r * 1.8, seed, flat: 0.3, bump: 1.2, ragged: 0.35, segments: 40, rings: 5 });
   }
 
   const heightAt = (x: number, z: number) => {
@@ -130,7 +130,8 @@ export function buildScenery(physics: Physics, quality: 'high' | 'low'): Scenery
     (z < -2.5 && Math.abs(x) < 6.5) ||
     (x > 3 && z < -3 && Math.abs(x + z) < 2.4) ||
     nearStation(x, z, 2.0) ||
-    inRangeLane(x, 1, z);
+    inRangeLane(x, 1, z) ||
+    inDockLane(x, z);
   placeOnIsland(main, 9, 0.66, 0.9, mainAvoid);
   placeOnIsland(islands.find((i) => i.spec.name === 'satellite')!, 3, 0.3, 0.75, () => false);
   placeOnIsland(islands.find((i) => i.spec.name === 'west-isle')!, 5, 0.1, 0.8, () => false);
@@ -160,7 +161,6 @@ export function buildScenery(physics: Physics, quality: 'high' | 'low'): Scenery
   leaves.name = 'tree-leaves';
   root.add(trunks, leaves);
   for (const t of trees) {
-    if (Math.hypot(t.x, t.z) > 40) continue;
     physics.addStatic(RAPIER.ColliderDesc.cylinder(0.8 * t.s, 0.12 * t.s), { material: 'wood' }, new Vector3(t.x, t.h + 0.8 * t.s, t.z));
   }
 

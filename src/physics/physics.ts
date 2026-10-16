@@ -59,6 +59,8 @@ export interface StaticInfo {
   material: ImpactMaterial;
   /** Called when a prop hits this collider hard enough (e.g. a marimba bar). */
   onHit?(prop: Prop, strength: number): void;
+  /** The collider rides on this moving object (the skyboat): convert hit points into its frame. */
+  platform?: Object3D;
 }
 
 export interface PropOptions {
@@ -90,8 +92,12 @@ export class Physics {
   alpha = 0;
   gravityOn = true;
   steps = 0;
-  /** Callback run before each fixed step (kinematic targets). */
-  beforeStep: ((dt: number) => void) | null = null;
+  /**
+   * Callback run before each fixed step (kinematic targets). `ahead` is how far past
+   * the current frame time this step's state will be shown: interpolated props are
+   * drawn one step behind, so kinematic platforms lead by that much to line up.
+   */
+  beforeStep: ((dt: number, ahead: number) => void) | null = null;
   /** Called when a prop falls out of the world and respawns. */
   onRespawn: ((p: Prop) => void) | null = null;
 
@@ -107,13 +113,17 @@ export class Physics {
     this.events = new RAPIER.EventQueue(true);
   }
 
-  addStatic(desc: RAPIER.ColliderDesc, info: Partial<StaticInfo> = {}, position?: Vector3, quaternion?: Quaternion): RAPIER.Collider {
+  /**
+   * World geometry: walls, floors, islands. With `parent`, the collider rides on that
+   * (kinematic) body, like the skyboat's deck, and position/quaternion are relative to it.
+   */
+  addStatic(desc: RAPIER.ColliderDesc, info: Partial<StaticInfo> = {}, position?: Vector3, quaternion?: Quaternion, parent?: RAPIER.RigidBody): RAPIER.Collider {
     if (position) desc.setTranslation(position.x, position.y, position.z);
     if (quaternion) desc.setRotation(quaternion);
     desc.setCollisionGroups(GROUP_STATIC);
     if (info.onHit) desc.setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS).setContactForceEventThreshold(0.5);
-    const c = this.world.createCollider(desc);
-    this.staticInfo.set(c.handle, { walkable: info.walkable ?? false, material: info.material ?? 'stone', onHit: info.onHit });
+    const c = this.world.createCollider(desc, parent);
+    this.staticInfo.set(c.handle, { walkable: info.walkable ?? false, material: info.material ?? 'stone', onHit: info.onHit, platform: info.platform });
     return c;
   }
 
@@ -182,7 +192,7 @@ export class Physics {
         p.prevPos.copy(p.currPos);
         p.prevQuat.copy(p.currQuat);
       }
-      this.beforeStep?.(PHYSICS_DT);
+      this.beforeStep?.(PHYSICS_DT, 2 * PHYSICS_DT - this.accumulator);
       this.world.step(this.events);
       this.drainEvents();
       for (const p of this.props) {
@@ -292,14 +302,29 @@ export class Physics {
     }
   }
 
-  /** Cast a ray against static, walkable geometry. */
-  castWalkable(origin: Vector3, dir: Vector3, maxDist: number): { point: Vector3; normal: Vector3; dist: number; walkable: boolean } | null {
+  /** World geometry (static or riding a moving platform), as opposed to props and hands. */
+  readonly isWorld = (c: RAPIER.Collider): boolean => this.staticInfo.has(c.handle);
+
+  /** Cast a ray against world geometry (islands, decks, the moving skyboat…). */
+  castWalkable(origin: Vector3, dir: Vector3, maxDist: number): { point: Vector3; normal: Vector3; dist: number; walkable: boolean; collider: number; platform: Object3D | null } | null {
     const ray = new RAPIER.Ray(origin, dir);
-    const hit = this.world.castRayAndGetNormal(ray, maxDist, true, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC | RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC);
+    const hit = this.world.castRayAndGetNormal(ray, maxDist, true, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC, undefined, undefined, undefined, this.isWorld);
     if (!hit) return null;
     const info = this.staticInfo.get(hit.collider.handle);
     const point = _v.copy(dir).multiplyScalar(hit.timeOfImpact).add(origin).clone();
-    return { point, normal: new Vector3(hit.normal.x, hit.normal.y, hit.normal.z), dist: hit.timeOfImpact, walkable: !!info?.walkable };
+    return { point, normal: new Vector3(hit.normal.x, hit.normal.y, hit.normal.z), dist: hit.timeOfImpact, walkable: !!info?.walkable, collider: hit.collider.handle, platform: info?.platform ?? null };
+  }
+
+  /** First thing a ray hits that an arrow or a laser should stop at: world geometry or a free prop. */
+  castSolid(origin: Vector3, dir: Vector3, maxDist: number, includeProps = true): { dist: number; collider: RAPIER.Collider } | null {
+    const ray = new RAPIER.Ray(origin, dir);
+    const hit = this.world.castRay(ray, maxDist, true, undefined, undefined, undefined, undefined, (c) => {
+      if (this.isWorld(c)) return true;
+      if (!includeProps) return false;
+      const p = this.propByCollider.get(c.handle);
+      return !!p && !p.heldBy && !p.parked;
+    });
+    return hit ? { dist: hit.timeOfImpact, collider: hit.collider } : null;
   }
 
   /** Line of sight between two points against static geometry. */
@@ -309,7 +334,7 @@ export class Physics {
     if (len < 1e-4) return true;
     d.multiplyScalar(1 / len);
     const ray = new RAPIER.Ray(a, d);
-    const hit = this.world.castRay(ray, len - 0.05, true, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC | RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC);
+    const hit = this.world.castRay(ray, len - 0.05, true, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC, undefined, undefined, undefined, this.isWorld);
     return !hit;
   }
 }
