@@ -44,9 +44,20 @@ function renderPixels(app: App, cam: Camera, W: number, H: number): Uint8Array {
   const rt = new WebGLRenderTarget(W, H);
   rt.texture.colorSpace = SRGBColorSpace;
   (rt as WebGLRenderTarget & { isXRRenderTarget: boolean }).isXRRenderTarget = true;
+  // For an XR-flagged target the shaders already encode sRGB, as they do for the headset's
+  // RGBA8 layer. Left to itself, three would store an sRGB texture as SRGB8_ALPHA8 and the
+  // hardware would encode it a second time (linear 0.5 grey read back as 223, not 188).
+  rt.texture.internalFormat = 'RGBA8';
   const r = app.renderer;
   // The portals render their live views for this camera first.
   app.portals.renderFor(cam, new Vector4(0, 0, W, H));
+  // The sky is drawn around the eye, as in the headset (and the portals' views). Left
+  // where the player is, it has no position at all when the page has no size: the
+  // emulated eyes then have empty viewports and the XR camera is NaN.
+  const sky = app.sky.mesh;
+  const skyAt = sky.position.clone();
+  sky.position.setFromMatrixPosition(cam.matrixWorld);
+  sky.updateMatrixWorld();
   const xrEnabled = r.xr.enabled;
   const prevTarget = r.getRenderTarget();
   r.xr.enabled = false;
@@ -55,6 +66,8 @@ function renderPixels(app: App, cam: Camera, W: number, H: number): Uint8Array {
   r.render(app.scene, cam);
   r.setRenderTarget(prevTarget);
   r.xr.enabled = xrEnabled;
+  sky.position.copy(skyAt);
+  sky.updateMatrixWorld();
   app.portals.releaseSpare();
   const px = new Uint8Array(W * H * 4);
   r.readRenderTargetPixels(rt, 0, 0, W, H, px);
@@ -84,9 +97,9 @@ export async function snapshot(app: App, name: string, o: SnapshotOptions = {}):
   const width = o.width ?? 1280;
   const height = o.height ?? 720;
   const cam = snapshotCamera(app, o, width, height);
-  // Supersample 2x instead of MSAA: an XR-flagged render target with samples > 0
-  // fails to resolve in WebGL (INVALID_OPERATION), and we need the XR flag for
-  // tone mapping + sRGB output to match what the headset shows.
+  // Supersample 2x. (MSAA used to fail to resolve here, INVALID_OPERATION: three gives an
+  // XR-flagged target's multisample buffer RGBA8 storage, which didn't match the sRGB texture.
+  // With RGBA8 storage it resolves now, but supersampling smooths shading too, not just edges.)
   const ss = 2;
   const W = width * ss;
   const H = height * ss;

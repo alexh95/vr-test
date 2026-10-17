@@ -86,7 +86,9 @@ The page switches to the **low** quality preset automatically when it detects a 
 | ![The glider rack at the root of the plank, its windsock showing the breeze](docs/glider-rack.jpg) | ![Wearing the wing at the end of the plank, a toggle in each hand](docs/glider-plank.jpg) |
 | ![Banking left over the cloud sea](docs/glider.jpg) | ![From the harness: the canopy banked overhead, birds circling in a thermal](docs/glider-pilot.jpg) |
 
-(Rendered from the emulated headset with `__vr.snapshot()`.)
+(Rendered from the emulated headset with `__vr.snapshot()`, tone mapped and colour-encoded as the headset shows
+it. Re-rendered 2026-10-17: the earlier images were sRGB-encoded twice and looked brighter than the headset,
+night scenes most of all.)
 
 ## Controls
 

@@ -113,11 +113,20 @@ Same philosophy as `game-test`: a mechanical verification ladder the agent can r
 | `?emulate&selftest` | **37 scripted playtest checks** (21 at first, then 6 archery, 1 laser, 5 skyboat, 4 flares): grab and throw, teleport (and refusing the abyss), snap and smooth turn, walking, gravity gloves, painting, marimba by finger and by thrown ball, fireworks from the hand, console buttons (ray and poke), the gravity lever (things float), wrist menu (ray and poke), giant mode, tracked hands, and no frame errors. One JSON line per check. Runs against the dev server and the production build |
 | `window.__vr` | Probe: `state()`, `events()`, `prop(id)`, `snapshot(name)` |
 | `window.__driver` | Moves the emulated head and controllers in **world** coordinates, presses buttons, sweeps hands along paths at real frame rate |
-| `__vr.snapshot()` | Renders the player's view offscreen and posts it to the dev server → `.snapshots/<name>.png` (works while the page is hidden) |
+| `__vr.snapshot()` | Renders the player's view offscreen and posts it to the dev server → `.snapshots/<name>.png` (works while the page is hidden). Tone mapped and sRGB-encoded once, as the headset shows it |
 | `tools/contact-sheet.py` | Tiles snapshots into one image for review |
 | Hidden-page frame clock | Browsers pause `requestAnimationFrame` for hidden pages; in emulator mode a worker keeps 72 Hz frames coming, so tests run with the browser pane in the background |
 
 Bugs this loop caught before any human looked: a canvas sized 0×0 by the emulator (NaN cameras), the empty hand batting away what it had just thrown, hovering orbs ignoring the gloves' ballistic solve, flicks firing from the grab motion itself, an MSAA + XR-target readback failure, a desk swallowing its own button labels, mallets rolling off their shelf, z-fighting paint pots, and the 40° hand-frame fix above.
+
+**Snapshot brightness (fixed 2026-10-17).** Snapshots render into a target flagged as an XR target, so the
+shaders tone map and sRGB-encode as they do for the headset's RGBA8 layer. But three stored that target as sRGB
+(SRGB8_ALPHA8), so the hardware encoded every pixel again. Snapshots, `measureLuma()` and the gallery were
+brighter than the headset, darks most of all: a linear 0.5 grey read back as 223 instead of 188, and the night
+island measured 0.20 instead of 0.08. The night look and the flare lighting were judged on those. The target now
+has plain RGBA8 storage, and the gallery has been re-rendered. Snapshots also draw the sky around their own
+camera, as the portal views do. Before, the sky followed the XR camera, which is NaN when the page has no size (a
+hidden browser pane), so those snapshots had no sky.
 
 **Not testable here:** real SteamVR + Chrome, the Frame's actual touch/haptics reporting, comfort and feel. Those need you (see the first-run checklist in the README).
 
@@ -274,14 +283,15 @@ skyboat's deck, each with its own pistol. A pistol let go of near its case goes 
 - The cloud sea's shader gets the two brightest flares and lights a pool below them.
 - Smoke is lit on the CPU from the sky plus nearby flares, so a flare's own smoke plume glows.
 - Glow sprites stand in for bloom in the haze, and the light flickers like burning magnesium.
-- Measured: a white parachute flare at night more than doubles the average brightness of a view of the island
-  (0.20 → 0.47 in the self-test).
+- Measured: a white parachute flare at night about triples the average brightness of a view of the island
+  (0.08 → 0.26 in the self-test; 0.20 → 0.47 when snapshots were encoded twice, see §12).
 
 **Caught in snapshots and fixed:**
 - **No shadows from trees.** The spotlight's shadow depth was useless at 80 m (the bias swallowed anything
   shorter than about 5 m). The near plane and bias now scale with the flare's height.
 - **Daylight look.** The first version lit the island like daylight; it's now brighter than moonlight but keeps
-  the night, and it gets brighter as the flare sinks.
+  the night, and it gets brighter as the flare sinks. This was judged on snapshots that showed it brighter than
+  the headset does (§12).
 - **Beaded trails.** Smoke trails looked like strings of beads; puffs are now laid by distance flown, small and
   faint.
 - **Wrong row labels.** The case's row labels were back to front.
@@ -316,7 +326,8 @@ video. Details:
   - The views went to a plain linear render target, which uses different shader variants (no tone mapping, linear
     output), so three switched every material's program twice a frame. The views now render exactly as the eyes'
     framebuffer does (tone mapped, sRGB), and the portal surface shows them as they are. That also sped up the main
-    pass.
+    pass. Their texture is stored as sRGB, so the hardware encodes once more on write and decodes when the surface
+    samples it: the surface gets the same once-encoded colours as the eyes' framebuffer.
   - Seen from the perch, the whole main island is in view, and most of its 250 small meshes (toys, labels, station
     parts) are a pixel or two. Small meshes are now left out when they'd be under about 2 headset pixels (main pass)
     or 5 (portal views). This helps the main pass too: from the perch, looking at the island went from 600 draw
