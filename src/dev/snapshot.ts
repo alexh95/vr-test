@@ -1,4 +1,4 @@
-import { PerspectiveCamera, SRGBColorSpace, Vector3, WebGLRenderTarget, type Camera } from 'three';
+import { PerspectiveCamera, SRGBColorSpace, Vector3, Vector4, WebGLRenderTarget, type Camera } from 'three';
 import type { App } from '../app';
 import { EYES_ONLY_LAYER } from '../archery/scope';
 
@@ -45,6 +45,8 @@ function renderPixels(app: App, cam: Camera, W: number, H: number): Uint8Array {
   rt.texture.colorSpace = SRGBColorSpace;
   (rt as WebGLRenderTarget & { isXRRenderTarget: boolean }).isXRRenderTarget = true;
   const r = app.renderer;
+  // The portals render their live views for this camera first.
+  app.portals.renderFor(cam, new Vector4(0, 0, W, H));
   const xrEnabled = r.xr.enabled;
   const prevTarget = r.getRenderTarget();
   r.xr.enabled = false;
@@ -53,6 +55,7 @@ function renderPixels(app: App, cam: Camera, W: number, H: number): Uint8Array {
   r.render(app.scene, cam);
   r.setRenderTarget(prevTarget);
   r.xr.enabled = xrEnabled;
+  app.portals.releaseSpare();
   const px = new Uint8Array(W * H * 4);
   r.readRenderTargetPixels(rt, 0, 0, W, H, px);
   rt.dispose();
@@ -87,25 +90,11 @@ export async function snapshot(app: App, name: string, o: SnapshotOptions = {}):
   const ss = 2;
   const W = width * ss;
   const H = height * ss;
-  const rt = new WebGLRenderTarget(W, H);
-  rt.texture.colorSpace = SRGBColorSpace;
-  (rt as WebGLRenderTarget & { isXRRenderTarget: boolean }).isXRRenderTarget = true;
   if (cam instanceof PerspectiveCamera) {
     cam.aspect = width / height;
     cam.updateProjectionMatrix();
   }
-  const r = app.renderer;
-  const xrEnabled = r.xr.enabled;
-  const prevTarget = r.getRenderTarget();
-  r.xr.enabled = false;
-  r.setRenderTarget(rt);
-  r.clear();
-  r.render(app.scene, cam);
-  r.setRenderTarget(prevTarget);
-  r.xr.enabled = xrEnabled;
-  const px = new Uint8Array(W * H * 4);
-  r.readRenderTargetPixels(rt, 0, 0, W, H, px);
-  rt.dispose();
+  const px = renderPixels(app, cam, W, H);
 
   const big = document.createElement('canvas');
   big.width = W;

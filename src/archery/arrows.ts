@@ -145,6 +145,21 @@ export class ArrowSystem {
       _seg.subVectors(_tip1, _tip0);
       const len = _seg.length();
 
+      // Through a portal: out of its twin, still flying (this frame's remaining flight is free).
+      const crossing = this.app.portals.through(_tip0, _tip1);
+      if (crossing) {
+        next.applyMatrix4(crossing.m);
+        a.vel.applyQuaternion(crossing.q);
+        dir1.applyQuaternion(crossing.q);
+        a.from.applyMatrix4(crossing.m);
+        a.pos.copy(next);
+        a.mesh.position.copy(next);
+        a.mesh.quaternion.setFromUnitVectors(FWD, dir1);
+        a.whoosh?.(next);
+        bus.emit('portal-transit', { what: 'arrow', to: crossing.portal.partner.id });
+        continue;
+      }
+
       // What does the tip pass through this frame? Targets/balloons analytically, the world via Rapier.
       const rangeHit = a.state === 'flying' ? this.app.range.raycast(_tip0, _tip1) : null;
       let worldT = Infinity;

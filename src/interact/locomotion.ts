@@ -58,6 +58,9 @@ export class Locomotion {
   /** The moving platform (the skyboat) the arc landed on, if any. */
   private arcPlatform: Object3D | null = null;
   private readonly arcPoints: Vector3[] = [];
+  /** The arc went through a portal: the first point past it (else -1), and the turn it gives you. */
+  private arcBreak = -1;
+  private arcTurn = 0;
   private readonly dots: InstancedMesh;
   private readonly ring: Mesh;
   private readonly beam: Mesh;
@@ -69,14 +72,16 @@ export class Locomotion {
   private pending: Vector3 | null = null;
   /** A pending landing on a moving platform is kept in its frame, so you land where you aimed. */
   private pendingPlatform: Object3D | null = null;
+  /** A pending landing through a portal turns you the way the arc came out of it. */
+  private pendingTurn = 0;
   private onFaded: (() => void) | null = null;
   private vignette = 0;
   private readonly validColor = new Color(0x9ff3ff);
   private readonly invalidColor = new Color(0xff6b5e);
   /** Ground height under the player while walking (smoothed). */
   moving = false;
-  /** Comfort vignette requested by something else this frame (the skyboat turning). */
-  extraVignette = 0;
+  /** Comfort vignette requested by something else this frame (the skyboat or the glider turning). */
+  private requested = 0;
 
   constructor(private readonly app: App) {
     const dotMat = new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, toneMapped: false });
@@ -126,10 +131,24 @@ export class Locomotion {
     return { valid: this.arcValid, point: this.arcTarget, platform: this.arcPlatform };
   }
 
+  /** Ask for at least this much comfort vignette this frame (0..1). */
+  requestVignette(v: number): void {
+    this.requested = Math.max(this.requested, v);
+  }
+
   /** Returns true if the rig moved this frame. Adds hands busy aiming to `busy`. */
   update(dt: number, busy: Set<HandInput>): boolean {
     const { left, right } = this.app.input;
     let moved = false;
+    // In the air under the glider, the wing does the moving.
+    if (this.app.glider.flying) {
+      if (this.aimHand) {
+        this.aimHand = null;
+        this.hideArc();
+      }
+      this.moving = false;
+      return this.comfort(dt, 0);
+    }
 
     // ---- Teleport aim (right stick, or left stick in teleport mode) ----
     const wantsAim = (h: HandInput) => h.connected && h.stick.y < -0.65 && Math.abs(h.stick.x) < 0.75;
@@ -147,7 +166,7 @@ export class Locomotion {
       const h = this.aimHand;
       busy.add(h);
       if (releasedAim(h)) {
-        if (this.arcValid && h.connected) this.teleportTo(this.arcTarget.clone(), this.arcPlatform);
+        if (this.arcValid && h.connected) this.teleportTo(this.arcTarget.clone(), this.arcPlatform, this.arcTurn);
         this.aimHand = null;
         this.hideArc();
       } else this.computeArc(h);
@@ -193,15 +212,19 @@ export class Locomotion {
     }
     if (settings.turn === 'smooth' && Math.abs(sx) > 0.25) speedFactor = Math.max(speedFactor, Math.abs(sx) * 0.8);
     this.moving = speedFactor > 0;
+    return this.comfort(dt, speedFactor) || moved;
+  }
 
-    // ---- Comfort overlay ----
-    const vTarget = settings.vignette ? Math.max(clamp(speedFactor, 0, 1) * 0.85, this.extraVignette) : 0;
+  /** The comfort vignette and the blink. Returns true while a blink is running (it may move you). */
+  private comfort(dt: number, speedFactor: number): boolean {
+    const vTarget = settings.vignette ? Math.max(clamp(speedFactor, 0, 1) * 0.85, this.requested) : 0;
+    this.requested = 0;
     this.vignette += (vTarget - this.vignette) * damp(vTarget > this.vignette ? 12 : 5, dt);
     this.updateFade(dt);
     this.overlayUniforms.uVignette.value = this.vignette;
     this.overlayUniforms.uFade.value = this.fade;
     this.overlay.visible = this.app.inXR && (this.vignette > 0.01 || this.fade > 0.001);
-    return moved || this.fadeDir !== 0;
+    return this.fadeDir !== 0;
   }
 
   private updateFade(dt: number): void {
@@ -210,9 +233,10 @@ export class Locomotion {
       if (this.fade >= 1) {
         if (this.pending) {
           // The platform kept moving during the blink: land on the spot that was aimed at.
-          this.applyTeleport(this.pendingPlatform ? this.pendingPlatform.localToWorld(this.pending) : this.pending);
+          this.applyTeleport(this.pendingPlatform ? this.pendingPlatform.localToWorld(this.pending) : this.pending, this.pendingTurn);
           this.pending = null;
           this.pendingPlatform = null;
+          this.pendingTurn = 0;
         }
         this.onFaded?.();
         this.onFaded = null;
@@ -230,26 +254,37 @@ export class Locomotion {
     this.fadeDir = 1;
   }
 
-  /** Move so that the head ends up above `ground` (on `platform`, if it's on something that moves). */
-  teleportTo(ground: Vector3, platform: Object3D | null = null): void {
+  /**
+   * Move so that the head ends up above `ground` (on `platform`, if it's on something that
+   * moves), turned by `turn` first (an arc that went through a portal).
+   */
+  teleportTo(ground: Vector3, platform: Object3D | null = null, turn = 0): void {
+    // You can't teleport wearing a wing: it packs itself back onto its rack.
+    if (this.app.glider.harnessed) this.app.glider.stow('teleport');
     this.pending = platform ? platform.worldToLocal(ground.clone()) : ground;
     this.pendingPlatform = platform;
+    this.pendingTurn = turn;
     this.fadeDir = 1;
     teleportSound(null);
-    bus.emit('teleport', { x: +ground.x.toFixed(2), y: +ground.y.toFixed(2), z: +ground.z.toFixed(2) });
+    bus.emit('teleport', { x: +ground.x.toFixed(2), y: +ground.y.toFixed(2), z: +ground.z.toFixed(2), ...(turn ? { portal: true } : {}) });
   }
 
-  private applyTeleport(ground: Vector3): void {
+  private applyTeleport(ground: Vector3, turn = 0): void {
     const rig = this.app.rig;
+    // Through a portal: face the way you'd be facing had you walked through it.
+    if (turn) this.turn(turn);
     const head = this.app.headPosition(_v);
     rig.position.x += ground.x - head.x;
     rig.position.z += ground.z - head.z;
     rig.position.y = ground.y + this.app.floorOffset * this.app.rigScale;
     this.app.updateRig();
+    this.app.portals.resetTracking();
   }
 
   /** Back to the spawn point (wrist menu, falling off). */
   recenter(): void {
+    // A wing goes back on its rack first.
+    if (this.app.glider.harnessed) this.app.glider.stow('recenter');
     this.blink(() => {
       const rig = this.app.rig;
       rig.rotation.y = SPAWN.yaw;
@@ -259,6 +294,7 @@ export class Locomotion {
       rig.position.x += SPAWN.x - head.x;
       rig.position.z += SPAWN.z - head.z;
       this.app.updateRig();
+      this.app.portals.resetTracking();
     });
   }
 
@@ -285,11 +321,13 @@ export class Locomotion {
     const nz = head.z + mz * step;
     const rig = this.app.rig;
     const footY = rig.position.y - this.app.floorOffset * scale;
-    const hit = this.app.physics.castWalkable(_v2.set(nx, footY + 0.6 * scale, nz), _dir.set(0, -1, 0), 1.6 * scale);
-    if (!hit || !hit.walkable || hit.point.y - footY > 0.45 * scale) return false;
+    const hit = this.app.physics.castWalkable(_v2.set(nx, footY + 0.6 * scale, nz), _dir.set(0, -1, 0), 1.6 * scale, true);
+    // Wearing a wing you can walk right off the edge (and then you're flying).
+    const offEdge = !hit && this.app.glider.harnessed;
+    if (!offEdge && (!hit || !hit.walkable || hit.point.y - footY > 0.45 * scale)) return false;
     rig.position.x += nx - head.x;
     rig.position.z += nz - head.z;
-    rig.position.y += (hit.point.y + this.app.floorOffset * scale - rig.position.y) * damp(18, dt);
+    if (hit) rig.position.y += (hit.point.y + this.app.floorOffset * scale - rig.position.y) * damp(18, dt);
     this.app.updateRig();
     return true;
   }
@@ -304,10 +342,23 @@ export class Locomotion {
     this.arcPoints[n++].copy(p);
     this.arcValid = false;
     this.arcPlatform = null;
+    this.arcBreak = -1;
+    this.arcTurn = 0;
     let hitPoint: Vector3 | null = null;
     for (let i = 0; i < 150 && n < this.arcPoints.length; i++) {
       const next = _v2.set(p.x + vel.x * dt, p.y + vel.y * dt + 0.5 * g * dt * dt, p.z + vel.z * dt);
       vel.y += g * dt;
+      // Into a portal's opening: the arc carries on out of its twin (you see that part through the portal).
+      const through = this.arcBreak < 0 ? this.app.portals.through(p, next) : null;
+      if (through) {
+        next.applyMatrix4(through.m);
+        vel.applyQuaternion(through.q);
+        this.arcTurn = through.portal.partner.root.rotation.y + Math.PI - through.portal.root.rotation.y;
+        p.copy(next);
+        this.arcBreak = n;
+        this.arcPoints[n++].copy(p);
+        continue;
+      }
       const seg = new Vector3().subVectors(next, p);
       const len = seg.length();
       const hit = this.app.physics.castWalkable(p, seg.multiplyScalar(1 / len), len);
@@ -322,9 +373,10 @@ export class Locomotion {
       this.arcPoints[n++].copy(p);
       if (p.y < -60) break;
     }
-    // Lay the dots along the arc, flowing toward the target.
+    // Lay the dots along the arc, flowing toward the target (none across the jump through a portal).
+    const segLen = (i: number) => (i === this.arcBreak ? 0 : this.arcPoints[i].distanceTo(this.arcPoints[i - 1]));
     let total = 0;
-    for (let i = 1; i < n; i++) total += this.arcPoints[i].distanceTo(this.arcPoints[i - 1]);
+    for (let i = 1; i < n; i++) total += segLen(i);
     const flow = (performance.now() / 1000) * 1.6;
     const color = this.arcValid ? this.validColor : this.invalidColor;
     (this.dots.material as MeshBasicMaterial).color.copy(color);
@@ -334,12 +386,12 @@ export class Locomotion {
       let acc = 0;
       let pos = this.arcPoints[0];
       for (let i = 1; i < n; i++) {
-        const segLen = this.arcPoints[i].distanceTo(this.arcPoints[i - 1]);
-        if (acc + segLen >= along) {
-          pos = _v2.lerpVectors(this.arcPoints[i - 1], this.arcPoints[i], (along - acc) / Math.max(segLen, 1e-6));
+        const len = segLen(i);
+        if (len > 0 && acc + len >= along) {
+          pos = _v2.lerpVectors(this.arcPoints[i - 1], this.arcPoints[i], (along - acc) / len);
           break;
         }
-        acc += segLen;
+        acc += len;
         pos = this.arcPoints[i];
       }
       const sc = (0.5 + 0.5 * Math.sin(frac * Math.PI)) * Math.sqrt(scale);
@@ -365,6 +417,8 @@ export class Locomotion {
     this.dots.visible = this.ring.visible = this.beam.visible = false;
     this.arcValid = false;
     this.arcPlatform = null;
+    this.arcBreak = -1;
+    this.arcTurn = 0;
   }
 
   /** Cancel an in-progress aim (session end). */
@@ -375,7 +429,8 @@ export class Locomotion {
     this.fadeDir = 0;
     this.pending = null;
     this.pendingPlatform = null;
-    this.extraVignette = 0;
+    this.pendingTurn = 0;
+    this.requested = 0;
     this.overlay.visible = false;
   }
 }

@@ -184,7 +184,7 @@ export class SkyBoat {
     this.syncRoot();
     this.syncControls();
     this.animate(dt);
-    this.app.locomotion.extraVignette = this.aboard && settings.vignette ? clamp(Math.abs(this.turnRate) / MAX_TURN, 0, 1) * 0.45 : 0;
+    if (this.aboard && settings.vignette) this.app.locomotion.requestVignette(clamp(Math.abs(this.turnRate) / MAX_TURN, 0, 1) * 0.45);
     if (!this.aboard) return false;
     const rig = this.app.rig;
     const moved = this.pos.x !== x0 || this.pos.y !== y0 || this.pos.z !== z0 || this.heading !== h0;
@@ -219,6 +219,8 @@ export class SkyBoat {
     const app = this.app;
     // Out of VR there's no head to track: whoever was aboard stays aboard.
     if (!app.inXR) return this.aboard;
+    // Gliding over her isn't being aboard (landing on the deck is).
+    if (app.glider.flying) return false;
     const s = app.rigScale;
     const local = this.root.worldToLocal(app.headPosition(_l));
     const floor = app.rig.position.y - app.floorOffset * s;

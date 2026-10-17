@@ -513,3 +513,161 @@ export function dryClick(at: Vector3): void {
   tone(v.input, v.t0, 'square', 2300, 0.3, 0.001, 0.015);
   noiseBurst(v.input, v.t0, 'highpass', 4000, 0.7, 0.4, 0.001, 0.02);
 }
+
+// ---- Portals ----
+
+export interface PortalHum {
+  /** `level` 0..1: how loud (you're near it). */
+  update(at: Vector3, level: number): void;
+}
+
+/** A glassy drone that hangs around a portal: two detuned sines and a slow beat. */
+export function portalHum(): PortalHum | null {
+  const ctx = audio.ctx;
+  const out = audio.sfxInput;
+  if (!ctx || !out || ctx.state !== 'running') return null;
+  const t = ctx.currentTime;
+  const panner = ctx.createPanner();
+  panner.panningModel = 'HRTF';
+  panner.distanceModel = 'inverse';
+  panner.refDistance = 1.5;
+  panner.maxDistance = 10000;
+  const level = ctx.createGain();
+  level.gain.value = 0;
+  const beat = ctx.createGain();
+  beat.gain.value = 0.8;
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = 0.35;
+  const depth = ctx.createGain();
+  depth.gain.value = 0.25;
+  lfo.connect(depth).connect(beat.gain);
+  for (const [f, type, g] of [
+    [110, 'sine', 0.6],
+    [164.8, 'sine', 0.4],
+    [220.5, 'triangle', 0.15],
+  ] as const) {
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.value = f;
+    const og = ctx.createGain();
+    og.gain.value = g;
+    o.connect(og).connect(beat);
+    o.start(t);
+  }
+  beat.connect(level).connect(panner).connect(out);
+  lfo.start(t);
+  return {
+    update(at, l) {
+      setPannerPosition(panner, at);
+      level.gain.setTargetAtTime(0.1 * l, ctx.currentTime, 0.3);
+    },
+  };
+}
+
+/** Stepping through: a rush of air and a rising chime. */
+export function portalWhoosh(at: Vector3): void {
+  whoosh(at, true, 0.4, 0.45);
+  const v = audio.voice({ at, life: 0.8, wet: 0.5, gain: 0.25 });
+  if (!v) return;
+  tone(v.input, v.t0, 'sine', 660, 0.7, 0.01, 0.6, 1320);
+  tone(v.input, v.t0 + 0.05, 'sine', 990, 0.35, 0.01, 0.5, 1980);
+}
+
+// ---- Paraglider ----
+
+export interface GliderWind {
+  /** `speed` 0..1 of top speed; `flying` false fades it out. */
+  update(speed: number, flying: boolean): void;
+}
+
+/** Air rushing past you in flight (head-locked), with the canopy's flutter in it. */
+export function gliderWind(): GliderWind | null {
+  const ctx = audio.ctx;
+  const out = audio.sfxInput;
+  if (!ctx || !out || ctx.state !== 'running') return null;
+  const t = ctx.currentTime;
+  const src = audio.noiseSource(t, 0.8);
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 500;
+  bp.Q.value = 0.5;
+  const level = ctx.createGain();
+  level.gain.value = 0;
+  const flutter = ctx.createGain();
+  flutter.gain.value = 0.85;
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = 5.5;
+  const depth = ctx.createGain();
+  depth.gain.value = 0.15;
+  lfo.connect(depth).connect(flutter.gain);
+  src.connect(bp).connect(flutter).connect(level).connect(out);
+  lfo.start(t);
+  return {
+    update(speed, flying) {
+      const now = ctx.currentTime;
+      const k = Math.min(1, Math.max(0, speed));
+      level.gain.setTargetAtTime(flying ? 0.04 + 0.16 * k * k : 0, now, flying ? 0.3 : 0.6);
+      bp.frequency.setTargetAtTime(380 + 900 * k, now, 0.4);
+      lfo.frequency.setTargetAtTime(4 + 5 * k, now, 0.4);
+    },
+  };
+}
+
+/** The wing filling with air: a deep fwump and a rising rush. */
+export function canopyOpen(at: Vector3): void {
+  const v = audio.voice({ at, life: 0.9, wet: 0.2, gain: 0.5, ref: 3 });
+  if (!v) return;
+  noiseBurst(v.input, v.t0, 'lowpass', 300, 0.8, 0.9, 0.05, 0.35, 1400);
+  tone(v.input, v.t0, 'sine', 70, 0.6, 0.04, 0.3, 110);
+  noiseBurst(v.input, v.t0 + 0.12, 'bandpass', 900, 1.5, 0.4, 0.1, 0.4, 2200);
+}
+
+/** The wing collapsing on landing: a soft sigh of fabric. */
+export function canopyCollapse(at: Vector3): void {
+  const v = audio.voice({ at, life: 0.8, wet: 0.2, gain: 0.4, ref: 3 });
+  if (!v) return;
+  noiseBurst(v.input, v.t0, 'bandpass', 1400, 1.2, 0.7, 0.03, 0.6, 300);
+  tone(v.input, v.t0, 'sine', 120, 0.3, 0.02, 0.25, 60);
+}
+
+export interface Vario {
+  /** `climb` in m/s; beeps faster and higher the faster you rise. */
+  update(climb: number, on: boolean): void;
+}
+
+/** A paraglider's variometer: silent when sinking, beeping when the air carries you up. */
+export function vario(): Vario | null {
+  const ctx = audio.ctx;
+  const out = audio.sfxInput;
+  if (!ctx || !out || ctx.state !== 'running') return null;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 2600;
+  lp.connect(out);
+  let next = 0;
+  return {
+    update(climb, on) {
+      const now = ctx.currentTime;
+      if (!on || climb < 0.2) {
+        next = Math.max(next, now);
+        return;
+      }
+      if (next > now + 0.05) return;
+      const k = Math.min(1, (climb - 0.2) / 3);
+      const period = 0.5 - 0.34 * k;
+      const t = Math.max(now, next);
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = 620 + 640 * k;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.03, t + 0.008);
+      g.gain.setValueAtTime(0.03, t + period * 0.42);
+      g.gain.linearRampToValueAtTime(0, t + period * 0.5);
+      o.connect(g).connect(lp);
+      o.start(t);
+      o.stop(t + period * 0.55);
+      next = t + period;
+    },
+  };
+}

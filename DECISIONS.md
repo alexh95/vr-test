@@ -290,6 +290,137 @@ skyboat's deck, each with its own pistol. A pistol let go of near its case goes 
 **Smoke rendering.** Camera-facing quads, instanced into one draw call, sorted back to front each frame, with
 four puff shapes in a small atlas. They grow, drift, rise and fade, and fog and tone mapping match the scene.
 
-## 17. Deliberately out of scope (for now)
+## 17. Portals (added 2026-10-17)
 
-Multiplayer, passthrough / `immersive-ar` (the Frame's passthrough is monochrome and not exposed to WebXR), WebXR Layers (not supported by the community Frame build), eye tracking (not in WebXR), asset pipelines, and saving paintings.
+You picked two ideas to build next; this is the first: a see-through portal pair linking two islands, rendered live
+per eye, seamless to walk through, and things you throw or shoot go through too.
+
+**Where.** One stands on the main island south-west of spawn, facing it. Its twin is on the perch, a high far
+island 100 m out and 22 m up, facing back toward the main island, with a glider rack at its rim (the second idea
+is the glider; the two are meant together: step through, glide home).
+
+**The view: a camera standing at the twin, per eye.** Every frame, before the scene is drawn, each eye's camera is
+carried through the portal pair (the twin's frame × a half turn × the inverse of this portal's frame) and the scene
+is rendered from there into a texture. The portal's surface looks that texture up by screen position, so each eye
+sees through it from where that eye is: real parallax and stereo depth, like a window, not a screen showing a
+video. Details:
+- **Oblique near plane**: the view camera's near plane is moved onto the twin's opening, so nothing between that
+  camera and the twin is drawn (the technique three's `Reflector` uses for mirrors). It stays at least 6 cm in
+  front of the camera, because a head right in the opening would otherwise make the projection degenerate.
+- **Cost control**: each view is rendered at 75% of the eye's resolution (50% on low), only inside the rectangle
+  the opening covers on screen, with the camera's frustum narrowed to that rectangle so nothing outside it costs a
+  draw call. Nothing is rendered when the portal is behind you, off screen or over 45 m away (it shows a slow
+  swirl).
+- **Measured, and what it led to** (production build, CPU time per frame for both eyes): the first version spent
+  7.6 ms on the portal views with the main pass at 3.6 ms. Two causes:
+  - The views went to a plain linear render target, which uses different shader variants (no tone mapping, linear
+    output), so three switched every material's program twice a frame. The views now render exactly as the eyes'
+    framebuffer does (tone mapped, sRGB), and the portal surface shows them as they are. That also sped up the main
+    pass.
+  - Seen from the perch, the whole main island is in view, and most of its 250 small meshes (toys, labels, station
+    parts) are a pixel or two. Small meshes are now left out when they'd be under about 2 headset pixels (main pass)
+    or 5 (portal views). This helps the main pass too: from the perch, looking at the island went from 600 draw
+    calls to 345 (6.1 → 4.0 ms).
+  - Now: 2.6-5 ms for the views depending on distance, plus 1-2.3 ms for the main pass, at either portal.
+- **Shadows on the other side**: the sun's shadow map follows the player, so the view through the portal had no
+  shadows, and they popped in as you stepped through (caught by comparing snapshots). Within 12 m of a portal, the
+  shadow map is now re-rendered once for the twin's surroundings during the portal pass and restored for the
+  main pass: one extra shadow pass a frame, only near a portal.
+- **XR cameras**: the eye cameras' matrices are taken as the XR manager left them for the frame. Recomputing them
+  drops the player rig's transform (they have no parent), which a snapshot caught.
+
+**Walking through, seamlessly.** After everything that can move you this frame (walking, the boat, the glider),
+the head's movement since last frame is tested against each opening (the segment's crossing of the plane, inside
+the ellipse). On a crossing, the rig gets the same transform as the view cameras, in the same frame, so what you
+saw through the portal is what's around you now: snapshots just before and just after stepping through show the
+same picture. The other classic problem is the near clip plane cutting a hole in the portal as your face passes
+through it. The surface is a thin elliptical prism that deepens away from you when your eyes come within a few
+centimetres, so there's always portal in front of the near plane. Teleports and session changes reset the tracking,
+so a blink can't trigger a crossing of its own.
+
+**With the stick and the teleport arc too.** Your first try found that only walking in the room went through:
+- **The stick** stopped you 8 cm short. Smooth walking only moves you where it finds walkable ground under your head,
+  and the hoop's bottom, lying across the threshold, counted as a wall under your feet. Its colliders are now marked
+  as something you step over, which checks for the ground under you ignore (the stick, and the glider's touchdown and
+  run-out). Arrows, balls and the glider still hit the hoop.
+- **The teleport arc** went through the opening and landed behind the portal on the same island. Now, when the arc
+  passes through an opening, it carries on from the twin with its direction turned to match, so it lands on the
+  other island. That part is drawn there, so you see it through the portal, with no dots across the 100 m jump.
+  The blink then turns you by the portals' turn before moving you, so you arrive facing out of the twin, as if
+  you'd walked through.
+
+**Things that go through.** Props are tested after every physics step (the path of their centre) and placed out of
+the twin with their velocity and spin turned to match; arrows test their tip's path and flares their own, every
+frame. The hoop is solid (colliders around the ring and the plinth): balls bounce off the frame and arrows stick in
+it; only the opening lets things through.
+
+**Considered.** Stencil portals (draw the other side straight into the frame through a stencil mask): cheaper on
+fill, but they need control of draw order and depth clears inside three's XR render loop. Rendering to a texture
+follows the mirror pattern that already works in XR and leaves the main render untouched. A portal that just
+fades you to black and teleports you would have been far simpler, but the point was to see through it and walk
+through it.
+
+## 18. The paraglider (added 2026-10-17)
+
+The second idea: a paraglider you take off the plank. You hold the brake toggles, walk off the edge, and steer by
+pulling them down.
+
+**Holding the real controls.** A rack holds the packed wing and its two toggles on hooks. Grip a toggle and the
+wing rises from behind you to over your head (about a second). Each brake is how far that hand is below your eyes:
+25 cm (shoulder height) is no brake, 42 cm lower (about your belly) is full brake. Considered: thumbstick steering
+(easier to learn, but the request was toggles, and steering with your arms makes every turn something you cause);
+weight shift (VR has no reliable signal for your hips). Let go of a toggle and it springs up under its pulley
+beside your head. Let go of both on the ground and the wing packs itself back on its rack. Teleport, Recenter and
+RESET pack it too.
+
+**Launch.** Wearing the wing, walking (physically or with the stick) is allowed off edges. When there's been no
+ground under your head for 0.3 s and the wing is up, you're flying. The end of the plank is the obvious place.
+
+**A small flight model, tuned for feel.** This isn't aerodynamics; it's a few numbers that behave like a beginner
+wing. You tried the first version and found it a bit hard to use, and asked for it slower, more responsive, and
+with more wind zones. What changed:
+- **Slower**: trim speed 6 m/s (was 10; a real wing flies about 10, but the islands are small) with 0.75 m/s sink,
+  still an 8:1 glide; both brakes slow you to 3.6 m/s (was 5.5). Everything happens at a pace you can follow and
+  line up.
+- **More responsive**: the turn follows the toggles within about a fifth of a second (was 0.4 s), speed and sink
+  within 0.4 s, and the canopy banks as fast. Full brake is 42 cm of travel (was 60), and the turn curve is steeper
+  near the middle, so a small pull already turns you. One brake down turns up to 60°/s; turning costs a little
+  sink.
+- **No stall**: both toggles all the way down now just sink you steeply (about 2 m/s) instead of stalling at 4 m/s:
+  a tool for landing rather than a trap if your arms sag.
+- A steady breeze drifts you: the same wind the flares and smoke drift in (it now lives in `world/wind.ts`).
+- **Thermals**: ten columns of rising air around the map (was three), 2.8-3.2 m/s in the core, fading out over
+  11-13 m and below their tops (34-50 m). Inside one the breeze doesn't drift you (the air is being drawn in), so
+  circling holds you in it. Their edges stay clear of the main island, so landing there stays easy.
+- **Ridge lift** (new): every island with a radius over 3 m lifts the breeze over its windward rim, up to 1.6-2.1
+  m/s just off the rim and up to twice the island's radius above its top, round the windward half and none on the
+  lee side. Over the island itself it fades within a couple of metres, so you can still land: from the lee side,
+  as real pilots do. The end of the plank is in it, so a launch from there starts gently.
+- **Finding lift**: each thermal is a column of faint streaks winding upward, with brighter pulses rising at the
+  air's speed (strongest at the column's silhouette, so it reads as a volume); dust spirals up inside it and birds
+  circle at the top. Dust is carried up over each windward rim. All of it is four draw calls, animated in vertex
+  shaders, faded right in front of your eyes and dimmer at night. The first pass was far too bright (light-ray
+  streaks and a snowstorm of dust, caught in a snapshot) and is now faint enough to read as air. A variometer beeps
+  faster and higher the faster you climb, and the controllers bump when you fly into rising air.
+
+**Comfort.** Your view never pitches or rolls. The canopy banks over you, but the risers stay upright beside your
+head, as if you were sitting level in the harness. Yaw from turning is the only rotation, applied around your head,
+and the comfort vignette closes a little with it. Speeds are moderate and changes are eased.
+
+**Landing and the edges of the sky.** You touch down when your feet reach walkable ground (any island, the boat's
+deck), run a few steps (stopping at edges and obstacles), and are still wearing the wing, so you can walk off
+another edge and fly again. Cliffs, trees and rocks: you slide along them rather than through. Sink into the
+clouds and you're blinked back to the rack the wing came from. Flying through a portal works too: the wing's
+heading turns with you.
+
+**The wing.** A parametric canopy: 32 cells with an airfoil section and a small bulge between ribs, an arc that
+curves the tips down, an elliptical planform, and a darker band of intakes along the leading edge underneath. The
+brakes pull the outer trailing edge down, so you can see what your hands are doing. Fabric glows in its own colours
+when the sun is on it (an emissive term multiplied by the vertex colour; plain emissive washed it out to grey in the
+first snapshot). The lines are rebuilt every frame: four rows of lines per side cascading into the risers, and
+brake lines over a pulley on the rear riser down to the toggles in your fists. Two wings, two colour schemes: orange
+and teal at home, violet and yellow on the perch.
+
+## 19. Deliberately out of scope (for now)
+
+Multiplayer (you'd like it later), passthrough / `immersive-ar` (the Frame's passthrough is monochrome and not exposed to WebXR), WebXR Layers (not supported by the community Frame build), eye tracking (not in WebXR), asset pipelines, and saving paintings.

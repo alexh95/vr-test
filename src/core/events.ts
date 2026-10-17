@@ -49,7 +49,13 @@ export type EventName =
   | 'flare-dry'
   | 'flare-deploy'
   | 'flare-land'
-  | 'flare-out';
+  | 'flare-out'
+  | 'portal-transit'
+  | 'glider-take'
+  | 'glider-launch'
+  | 'glider-land'
+  | 'glider-stow'
+  | 'glider-rescue';
 
 export interface BusEvent {
   name: EventName;

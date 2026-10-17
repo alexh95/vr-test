@@ -17,7 +17,7 @@ import {
 import { RAPIER, type Physics } from '../physics/physics';
 import { rng, TAU } from '../core/math';
 import { buildIsland, type Island, type IslandSpec } from './island';
-import { inDockLane, inRangeLane, nearStation } from './layout';
+import { inDockLane, inRangeLane, nearPerchFeature, nearStation } from './layout';
 import { mergeStatic } from '../core/merge';
 
 export interface Scenery {
@@ -135,7 +135,7 @@ export function buildScenery(physics: Physics, quality: 'high' | 'low'): Scenery
   placeOnIsland(main, 9, 0.66, 0.9, mainAvoid);
   placeOnIsland(islands.find((i) => i.spec.name === 'satellite')!, 3, 0.3, 0.75, () => false);
   placeOnIsland(islands.find((i) => i.spec.name === 'west-isle')!, 5, 0.1, 0.8, () => false);
-  for (const isl of islands.filter((i) => i.spec.name.startsWith('far-'))) placeOnIsland(isl, 4, 0.05, 0.7, () => false);
+  for (const isl of islands.filter((i) => i.spec.name.startsWith('far-'))) placeOnIsland(isl, 4, 0.05, 0.7, nearPerchFeature);
 
   const trunks = new InstancedMesh(trunkGeo, darkWood, trees.length);
   const leaves = new InstancedMesh(leafGeo, new MeshLambertMaterial({ color: 0xffffff, flatShading: true }), trees.length * 3);

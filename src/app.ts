@@ -4,6 +4,7 @@ import { flags, SPAWN } from './config';
 import { bus } from './core/events';
 import { clamp, damp } from './core/math';
 import { createRenderer } from './core/renderer';
+import { DetailCuller } from './core/detail';
 import { settings } from './core/settings';
 import { Stats } from './core/stats';
 import { XRSessionManager } from './core/xr-session';
@@ -37,9 +38,14 @@ import { Bow } from './archery/bow';
 import { EYES_ONLY_LAYER } from './archery/scope';
 import { SkyBoat } from './skyboat/skyboat';
 import { Flares } from './flares/flares';
+import { Portals } from './portals/portals';
+import { Glider } from './glider/glider';
 
 const GIANT_SCALE = 8;
+/** Meshes that would be under about two headset pixels across are left out of the frame. */
+const DETAIL_ANGLE = 0.002;
 const _follow = new Vector3();
+const _eye = new Vector3();
 
 export class App {
   readonly renderer: WebGLRenderer;
@@ -79,7 +85,11 @@ export class App {
   bow!: Bow;
   boat!: SkyBoat;
   flares!: Flares;
+  portals!: Portals;
+  glider!: Glider;
   readonly ambience = new Ambience();
+  /** Small-object culling for the main pass and the portals' views. */
+  readonly detail = new DetailCuller(this.scene);
   private orbit!: OrbitControls;
   private readonly shadowTarget = new Object3D();
   rigScale = 1;
@@ -178,10 +188,14 @@ export class App {
     this.bow = new Bow(this);
     this.boat = new SkyBoat(this);
     this.flares = new Flares(this);
+    this.portals = new Portals(this);
+    this.glider = new Glider(this);
+    this.portals.onPlayerTransit = (c, yaw) => this.glider.portalTransit(c, yaw);
     this.physics.beforeStep = (_dt, ahead) => {
       this.grab.beforeStep();
       this.boat.beforeStep(ahead);
     };
+    this.physics.afterStep = () => this.portals.afterStep();
 
     this.tod.onChange((p) => {
       this.clouds.applyPreset(p);
@@ -191,6 +205,7 @@ export class App {
       this.boat.setGlow(p.glow);
       this.bow.scope.setLook(p.zenith, p.horizon, p.skySunDir, p.glow);
       this.ambience.setMood(p.night);
+      for (const r of this.glider.racks) r.wing.setDaylight(1 - p.night);
     });
 
     // Desktop preview camera.
@@ -208,13 +223,16 @@ export class App {
       this.playArea.setSpace(info.boundedSpace);
       this.ambience.start();
       audio.setMusic(settings.music);
+      this.portals.resetTracking();
     };
     this.xr.onEnd = () => {
       this.bow.cancel();
       this.boat.releaseControls();
+      this.glider.releaseControls();
       this.grab.releaseAll();
       this.input.clear();
       this.locomotion.reset();
+      this.portals.resetTracking();
       this.playArea.clear();
       this.handModels.left.root.visible = this.handModels.right.root.visible = false;
       this.resize();
@@ -278,7 +296,9 @@ export class App {
     } catch (err) {
       this.report(err);
     }
+    this.detail.hide(this.headPosition(_eye), DETAIL_ANGLE, this.time);
     this.renderer.render(this.scene, this.camera);
+    this.detail.restore();
     this.stats.tick(dt, this.renderer);
   }
 
@@ -299,6 +319,8 @@ export class App {
     this.updateRig();
     // The skyboat flies first and carries you, so everything below sees hands where they are.
     if (this.boat.update(dt)) this.updateRig();
+    // So does the glider, if you're flying one.
+    if (this.glider.update(dt)) this.updateRig();
 
     const busy = new Set<HandInput>();
     const claimed = new Set<HandInput>();
@@ -306,8 +328,13 @@ export class App {
       this.wristMenu.update(dt);
       if (this.wristMenu.engaged) busy.add(this.input.right);
       if (this.locomotion.update(dt, busy)) this.updateRig();
+    }
+    // Through a portal? After everything that moves you, before anything reads the hands.
+    if (this.portals.update(dt)) this.updateRig();
+    if (inXR) {
       this.console.update(dt, claimed);
       this.boat.controls(claimed);
+      this.glider.controls(claimed);
       this.flares.preUpdate(claimed);
       this.bow.preUpdate(claimed);
       for (const h of claimed) busy.add(h);
@@ -348,6 +375,9 @@ export class App {
     // lights first, so the scope's view is lit by them too.
     this.flares.lateUpdate(dt);
     this.bow.lateUpdate(dt, this.time);
+    this.glider.lateUpdate(dt);
+    // The portals' views, for the eyes about to draw.
+    this.portals.render();
     this.onFrame?.(dt);
   }
 
@@ -419,6 +449,7 @@ export class App {
     this.range.resetScore();
     this.boat.reset();
     this.flares.reset();
+    this.glider.reset();
   }
 
   applyQuality(): void {

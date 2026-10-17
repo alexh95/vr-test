@@ -3,6 +3,10 @@ import { setSetting, settings } from '../core/settings';
 import { HELM } from '../skyboat/boat-model';
 import { THROTTLE_MAX } from '../skyboat/skyboat';
 import type { FlareGun } from '../flares/flares';
+import { SINK, SLOW, TRIM } from '../glider/glider';
+import { THERMALS } from '../glider/air';
+import { WIND } from '../world/wind';
+import { RX } from '../portals/portals';
 import { measureLuma } from './snapshot';
 import type { App } from '../app';
 import type { Emu } from './emulator';
@@ -191,6 +195,60 @@ async function pullTrigger(d: Driver): Promise<void> {
   d.press('right', 'trigger', 0);
   await d.frames(3);
 }
+
+// ---- glider helpers ----
+
+/** Toggles in hand at head height minus `left`/`right` m (0.2: hands up, no brake; 0.8: fully down). */
+function setToggles(d: Driver, left: number, right: number): void {
+  const head = d.head();
+  const yaw = d.app.input.headYaw();
+  const side = new Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+  const fwd = new Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+  const q = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw).multiply(d.qx(-17));
+  d.setGripWorld('left', head.clone().addScaledVector(side, -0.25).addScaledVector(fwd, 0.2).setY(head.y - left), q);
+  d.setGripWorld('right', head.clone().addScaledVector(side, 0.25).addScaledVector(fwd, 0.2).setY(head.y - right), q);
+}
+
+/** Stand at a rack, take both toggles off its hooks and let the wing rise. */
+async function takeGlider(d: Driver, rackIndex = 0): Promise<void> {
+  const app = d.app;
+  const rack = app.glider.racks[rackIndex];
+  const yaw = rack.root.rotation.y;
+  app.rig.position.copy(rack.stand);
+  app.rig.rotation.y = yaw;
+  app.updateRig();
+  d.setHeadWorld(rack.stand.clone().setY(rack.stand.y + 1.65), (yaw * 180) / Math.PI, -10);
+  const q = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw).multiply(d.qx(-17));
+  d.setGripWorld('left', rack.hook(0).clone(), q);
+  d.setGripWorld('right', rack.hook(1).clone(), q);
+  await d.frames(4);
+  d.press('left', 'squeeze', 1);
+  d.press('right', 'squeeze', 1);
+  await d.frames(3);
+  expect(app.glider.state === 'ground', `taking the toggles left the glider ${app.glider.state}`);
+  expect(app.glider.holding.size === 2, `holding ${app.glider.holding.size} toggles`);
+  setToggles(d, 0.2, 0.2);
+  await d.seconds(1.3);
+}
+
+/** Wearing the wing: be carried out over the void at `at` facing `yaw`, and fly. */
+async function flyFrom(d: Driver, at: Vector3, yaw: number): Promise<void> {
+  const app = d.app;
+  app.locomotion.turn(yaw - app.input.headYaw());
+  app.glider.heading = yaw;
+  const head = d.head();
+  app.rig.position.add(at.clone().sub(head));
+  app.updateRig();
+  setToggles(d, 0.2, 0.2);
+  await d.waitFor(() => app.glider.state === 'flying', 3, 'the launch');
+}
+
+const DEG2 = 180 / Math.PI;
+
+// ---- portal helpers ----
+
+/** A portal's facing (unit, horizontal): out of its front. */
+const portalFront = (yaw: number) => new Vector3(Math.sin(yaw), 0, Math.cos(yaw));
 
 const CHECKS: Check[] = [
   [
@@ -976,6 +1034,334 @@ const CHECKS: Check[] = [
       boat.throttleAngle = 0;
       expect(gun.docked, 'the pistol did not go back in the deck locker');
       return { boatSpeed: +boat.speed.toFixed(2) };
+    },
+  ],
+  [
+    'glider-launch-from-plank',
+    async (d) => {
+      const app = d.app;
+      const g = app.glider;
+      await takeGlider(d, 0);
+      // To the root of the plank, facing out along it; then walk off its end with the stick.
+      const tip = app.scenery.plankTip;
+      app.locomotion.turn(0 - app.input.headYaw());
+      const head = d.head();
+      app.rig.position.x += tip.x - head.x;
+      app.rig.position.z += tip.z + 2.8 - head.z;
+      app.rig.position.y = tip.y;
+      app.updateRig();
+      setToggles(d, 0.2, 0.2);
+      await d.frames(3);
+      expect(g.state === 'ground', `on the plank the glider is ${g.state}`);
+      d.emu.stick('left', 0, -1);
+      await d.waitFor(() => g.state === 'flying', 6, 'walking off the end of the plank');
+      d.emu.stick('left', 0, 0);
+      const launchZ = d.head().z;
+      expect(launchZ < tip.z, `launched at z ${launchZ.toFixed(2)}, before the plank's end (${tip.z.toFixed(2)})`);
+      await d.seconds(2.5);
+      expect(g.airspeed > TRIM - 0.4, `airspeed only ${g.airspeed.toFixed(2)}`);
+      // Trim sink, less whatever lift is about (the satellite's thermal reaches the plank).
+      expect(Math.abs(g.vy - (g.lift - SINK)) < 0.35, `vertical speed ${g.vy.toFixed(2)} m/s with ${g.lift.toFixed(2)} m/s of lift`);
+      // Flying: no teleport arc, and the stick doesn't walk you.
+      const before = d.head();
+      d.emu.stick('right', 0, -1);
+      await d.frames(10);
+      expect(!app.locomotion.teleportAiming, 'a teleport arc came up in flight');
+      d.emu.stick('right', 0, 0);
+      const flew = d.head().distanceTo(before);
+      return { launchZ: +launchZ.toFixed(2), airspeed: +g.airspeed.toFixed(2), vy: +g.vy.toFixed(2), lift: +g.lift.toFixed(2), flew: +flew.toFixed(1) };
+    },
+  ],
+  [
+    'glider-steers-and-brakes',
+    async (d) => {
+      const g = d.app.glider;
+      await takeGlider(d, 0);
+      await flyFrom(d, new Vector3(0, 30, -45), 0);
+      await d.seconds(1.5);
+      let h0 = g.heading;
+      setToggles(d, 0.85, 0.2);
+      await d.seconds(1.5);
+      const left = (g.heading - h0) * DEG2;
+      expect(left > 40, `the left toggle turned ${left.toFixed(0)}° (want > 40° left)`);
+      setToggles(d, 0.2, 0.85);
+      await d.seconds(0.6);
+      h0 = g.heading;
+      await d.seconds(1.5);
+      const right = (h0 - g.heading) * DEG2;
+      expect(right > 40, `the right toggle turned ${right.toFixed(0)}° (want > 40° right)`);
+      setToggles(d, 0.8, 0.8);
+      await d.seconds(2);
+      const slow = g.airspeed;
+      expect(slow < SLOW + 0.3, `both toggles down: still ${slow.toFixed(2)} m/s`);
+      setToggles(d, 0.2, 0.2);
+      await d.seconds(2);
+      expect(g.airspeed > TRIM - 0.3, `hands up: only ${g.airspeed.toFixed(2)} m/s`);
+      return { leftDeg: Math.round(left), rightDeg: Math.round(right), slow: +slow.toFixed(2), trim: +g.airspeed.toFixed(2) };
+    },
+  ],
+  [
+    'glider-thermal-climbs',
+    async (d) => {
+      const g = d.app.glider;
+      const t = THERMALS[0];
+      await takeGlider(d, 0);
+      await flyFrom(d, new Vector3(t.x + 5, 8, t.z), 0);
+      // Circle tight to the left, around the core.
+      setToggles(d, 0.85, 0.2);
+      const y0 = d.head().y;
+      await d.seconds(8);
+      const climb = d.head().y - y0;
+      expect(climb > 3, `circled 8 s in the ${t.name} thermal and climbed ${climb.toFixed(1)} m`);
+      return { thermal: t.name, climb: +climb.toFixed(1), lift: +g.lift.toFixed(2) };
+    },
+  ],
+  [
+    'glider-ridge-lift',
+    async (d) => {
+      const g = d.app.glider;
+      const main = g.air.ridges.find((r) => r.name === 'main-island')!;
+      const wind = new Vector3(WIND.x, 0, WIND.z).normalize();
+      // Just off the main island's windward rim, a little above its top, flying along the rim.
+      const at = new Vector3(main.x, main.top + 2.5, main.z).addScaledVector(wind, -main.radius * 1.15);
+      const best = g.air.sample(at).ridge;
+      expect(best > SINK + 0.5, `ridge lift at the windward rim is only ${best.toFixed(2)} m/s`);
+      const lee = g.air.sample(new Vector3(main.x, main.top + 2.5, main.z).addScaledVector(wind, main.radius * 1.15)).ridge;
+      expect(lee === 0, `ridge lift on the lee side: ${lee.toFixed(2)} m/s`);
+      await takeGlider(d, 0);
+      await flyFrom(d, at, Math.atan2(-wind.z, wind.x));
+      const y0 = d.head().y;
+      await d.seconds(2);
+      const climb = d.head().y - y0;
+      expect(climb > 0.3, `along the ridge for 2 s: ${climb.toFixed(2)} m`);
+      return { ridgeLift: +best.toFixed(2), climb: +climb.toFixed(2) };
+    },
+  ],
+  [
+    'glider-lands-and-packs',
+    async (d) => {
+      const app = d.app;
+      const g = app.glider;
+      const lands = d.count('glider-land');
+      await takeGlider(d, 0);
+      // Low over the south rim, heading north into the breeze: the lee side, where there's no
+      // ridge lift (the windward rim would carry you right over the island).
+      await flyFrom(d, new Vector3(0, 2.3, 13), 0);
+      await d.waitFor(() => g.state !== 'flying', 8, 'touchdown');
+      expect(g.state === 'landing', `after touchdown the glider is ${g.state}`);
+      expect(d.count('glider-land') === lands + 1, 'no glider-land event');
+      const at = d.head();
+      expect(app.scenery.heightAt(at.x, at.z) !== null, 'touched down off the island');
+      await d.waitFor(() => g.state === 'ground', 4, 'the run-out to end');
+      // Let go of both toggles: it packs itself back onto its rack.
+      d.press('left', 'squeeze', 0);
+      d.press('right', 'squeeze', 0);
+      await d.waitFor(() => g.state === 'idle', 3, 'the wing to pack away');
+      const rack = g.racks[0];
+      expect(rack.pack.visible && !rack.wing.visible, 'the wing is not back on its rack');
+      const stow = d.last('glider-stow') as { reason: string };
+      expect(stow.reason === 'let go', `packed away because of ${stow.reason}`);
+      return { landedAt: at.toArray().map((v) => +v.toFixed(1)), flight: d.last('glider-land') };
+    },
+  ],
+  [
+    'glider-rescue',
+    async (d) => {
+      const app = d.app;
+      const g = app.glider;
+      const rescues = d.count('glider-rescue');
+      await takeGlider(d, 1);
+      // Far out over the clouds and nearly down to them: the next metres call the rescue.
+      await flyFrom(d, new Vector3(40, -33.2, 30), 0);
+      await d.waitFor(() => d.count('glider-rescue') > rescues, 6, 'the rescue');
+      await d.waitFor(() => g.state === 'idle', 3, 'the blink home');
+      await d.frames(3);
+      const rack = g.racks[1];
+      const head = d.head();
+      const off = Math.hypot(head.x - rack.stand.x, head.z - rack.stand.z);
+      expect(off < 0.5, `rescued to ${off.toFixed(2)} m from the perch rack`);
+      expect(Math.abs(app.rig.position.y - rack.stand.y) < 0.05, 'not standing at the rack');
+      expect(rack.pack.visible, 'the perch wing is not back on its rack');
+      return { off: +off.toFixed(2) };
+    },
+  ],
+  [
+    'portal-walk-through',
+    async (d) => {
+      const app = d.app;
+      const P = app.portals;
+      const home = P.home;
+      const front = portalFront(home.root.rotation.y);
+      const feet = home.root.position.clone().addScaledVector(front, 1.5);
+      app.rig.position.copy(feet).setY(home.root.position.y);
+      app.rig.rotation.y = 0;
+      app.updateRig();
+      d.setHeadWorld(feet.clone().setY(feet.y + 1.6), Math.atan2(front.x, front.z) * DEG2);
+      await d.frames(3);
+      P.resetTracking();
+      await d.frames(2);
+      // Walk 3 m straight ahead in the room: through the opening.
+      const dev = d.emu.device;
+      const start = new Vector3(dev.position.x, dev.position.y, dev.position.z);
+      const transits = P.transits;
+      for (let i = 1; i <= 30; i++) {
+        const p = start.clone().addScaledVector(front, -0.1 * i);
+        dev.position.set(p.x, p.y, p.z);
+        await d.frames(1);
+      }
+      await d.frames(2);
+      expect(P.transits === transits + 1, `went through ${P.transits - transits} times`);
+      const perch = P.perch;
+      const head = d.head();
+      const out = perch.side(head);
+      expect(out > 1.2 && out < 1.8, `came out ${out.toFixed(2)} m in front of the perch portal`);
+      const yaw = app.input.headYaw();
+      const look = new Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+      const along = look.dot(portalFront(perch.root.rotation.y));
+      expect(along > 0.99, `facing ${along.toFixed(2)} along the perch portal's front`);
+      const ev = d.last('portal-transit') as { what: string; to: string };
+      expect(ev.what === 'player' && ev.to === 'portal-perch', 'no transit event');
+      return { out: +out.toFixed(2), facing: +along.toFixed(3) };
+    },
+  ],
+  [
+    'portal-stick-walk-through',
+    async (d) => {
+      const app = d.app;
+      const P = app.portals;
+      const home = P.home;
+      const front = portalFront(home.root.rotation.y);
+      const feet = home.root.position.clone().addScaledVector(front, 1.5);
+      app.rig.position.copy(feet).setY(home.root.position.y);
+      app.rig.rotation.y = 0;
+      app.updateRig();
+      d.setHeadWorld(feet.clone().setY(feet.y + 1.6), Math.atan2(front.x, front.z) * DEG2);
+      await d.frames(3);
+      P.resetTracking();
+      await d.frames(2);
+      // Walk at it with the stick: over the hoop's bottom, through the opening.
+      const transits = P.transits;
+      d.emu.stick('left', 0, -1);
+      await d.waitFor(() => P.transits > transits, 3, 'walking through with the stick');
+      await d.seconds(0.3);
+      d.emu.stick('left', 0, 0);
+      await d.frames(2);
+      const perch = P.perch;
+      const out = perch.side(d.head());
+      expect(out > 0.1 && out < 2, `came out ${out.toFixed(2)} m in front of the perch portal`);
+      const yaw = app.input.headYaw();
+      const along = new Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).dot(portalFront(perch.root.rotation.y));
+      expect(along > 0.99, `facing ${along.toFixed(2)} along the perch portal's front`);
+      return { out: +out.toFixed(2) };
+    },
+  ],
+  [
+    'portal-teleport-through',
+    async (d) => {
+      const app = d.app;
+      const P = app.portals;
+      const home = P.home;
+      const perch = P.perch;
+      const front = portalFront(home.root.rotation.y);
+      const feet = home.root.position.clone().addScaledVector(front, 3.5);
+      app.rig.position.copy(feet).setY(home.root.position.y);
+      app.rig.rotation.y = 0;
+      app.updateRig();
+      d.setHeadWorld(feet.clone().setY(feet.y + 1.6), Math.atan2(front.x, front.z) * DEG2);
+      await d.frames(3);
+      // Aim the arc into the opening: it carries on out of the perch portal and lands there.
+      const centre = new Vector3().setFromMatrixPosition(home.world);
+      const hand = d.head().addScaledVector(front, -0.3).add(new Vector3(0.15, -0.35, 0));
+      d.setAimWorld('right', hand, d.lookQuat(hand, centre.clone().add(new Vector3(0, 0.3, 0))));
+      await d.frames(3);
+      d.emu.stick('right', 0, -1);
+      await d.frames(10);
+      const t = app.locomotion.target;
+      expect(t.valid, 'the arc through the portal has no valid landing');
+      const landing = t.point.clone();
+      expect(landing.distanceTo(perch.root.position) < 12, `the arc landed ${landing.distanceTo(perch.root.position).toFixed(1)} m from the perch portal`);
+      const yaw0 = app.rig.rotation.y;
+      d.emu.stick('right', 0, 0);
+      await d.frames(30);
+      const head = d.head();
+      expect(Math.hypot(head.x - landing.x, head.z - landing.z) < 0.05, 'head not over the landing point');
+      const turn = perch.root.rotation.y + Math.PI - home.root.rotation.y;
+      expect(Math.abs(app.rig.rotation.y - yaw0 - turn) < 1e-3, 'not turned the way the arc came out');
+      const yaw = app.input.headYaw();
+      const along = new Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).dot(portalFront(perch.root.rotation.y));
+      expect(along > 0.99, `facing ${along.toFixed(2)} along the perch portal's front`);
+      return { landing: landing.toArray().map((v) => +v.toFixed(2)) };
+    },
+  ],
+  [
+    'portal-view-renders',
+    async (d) => {
+      const app = d.app;
+      const home = app.portals.home;
+      const front = portalFront(home.root.rotation.y);
+      const eye = home.root.position.clone().addScaledVector(front, 3).setY(home.root.position.y + 1.6);
+      d.setHeadWorld(eye, Math.atan2(front.x, front.z) * DEG2);
+      await d.frames(3);
+      const r0 = home.renders;
+      await d.frames(10);
+      const facing = home.renders - r0;
+      expect(facing >= 20, `${facing} views rendered in 10 frames looking at it (want both eyes, every frame)`);
+      expect(home.fresh[0] && home.fresh[1], 'the eyes have no fresh view');
+      // Turned away, it costs nothing.
+      d.setHeadWorld(eye, Math.atan2(front.x, front.z) * DEG2 + 180);
+      await d.frames(3);
+      const r1 = home.renders;
+      await d.frames(10);
+      expect(home.renders === r1, `${home.renders - r1} views rendered looking away`);
+      return { perFrame: facing / 10 };
+    },
+  ],
+  [
+    'portal-ball-through',
+    async (d) => {
+      const app = d.app;
+      const P = app.portals;
+      const home = P.home;
+      const ball = app.physics.props.find((p) => p.id === 'ball-0')!;
+      const front = portalFront(home.root.rotation.y);
+      const centre = new Vector3().setFromMatrixPosition(home.world);
+      app.physics.place(ball, centre.clone().addScaledVector(front, 1.2), new Quaternion());
+      ball.body.setLinvel(front.clone().multiplyScalar(-4).setY(1), true);
+      const transits = d.count('portal-transit');
+      await d.waitFor(() => d.count('portal-transit') > transits, 3, 'the ball to go through');
+      const ev = d.last('portal-transit') as { what: string; to: string };
+      expect(ev.what === 'ball-0' && ev.to === 'portal-perch', `transit of ${ev.what} to ${ev.to}`);
+      await d.frames(2);
+      const perch = P.perch;
+      const at = ball.currPos.clone();
+      const out = perch.side(at);
+      const v = ball.body.linvel();
+      const away = new Vector3(v.x, 0, v.z).dot(portalFront(perch.root.rotation.y));
+      expect(at.distanceTo(new Vector3().setFromMatrixPosition(perch.world)) < 3, 'the ball is not at the perch portal');
+      expect(out > 0 && away > 2, `the ball isn't coming out of the perch portal (side ${out.toFixed(2)}, speed out ${away.toFixed(2)})`);
+      return { out: +out.toFixed(2), speedOut: +away.toFixed(2) };
+    },
+  ],
+  [
+    'portal-arrow-through',
+    async (d) => {
+      const app = d.app;
+      const P = app.portals;
+      const home = P.home;
+      const front = portalFront(home.root.rotation.y);
+      const centre = new Vector3().setFromMatrixPosition(home.world);
+      const transits = d.count('portal-transit');
+      shootDirect(d, centre.clone().addScaledVector(front, 4).setY(centre.y + 0.1), centre.clone().addScaledVector(front, -4), 45);
+      await d.waitFor(() => d.count('portal-transit') > transits, 2, 'the arrow to go through');
+      const ev = d.last('portal-transit') as { what: string };
+      expect(ev.what === 'arrow', `transit of ${ev.what}`);
+      await d.frames(3);
+      const arrow = app.arrows.arrows.find((a) => a.state === 'flying' || a.state === 'stuck');
+      expect(!!arrow, 'the arrow is gone');
+      const out = P.perch.side(arrow!.pos);
+      expect(out > 0.5, `the arrow is ${out.toFixed(2)} m from the perch portal's front`);
+      expect(Math.hypot(arrow!.pos.x - P.perch.root.position.x, arrow!.pos.z - P.perch.root.position.z) < 40, 'the arrow is not at the perch');
+      return { out: +out.toFixed(1), state: arrow!.state, rx: RX };
     },
   ],
   [

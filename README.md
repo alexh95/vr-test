@@ -5,7 +5,8 @@ screen: grab and throw physics toys, **pull things to your hand with gravity glo
 the air, play a marimba, light a firework in your hand and hear the boom arrive late, flip gravity off, grow to
 giant size, walk the plank over a 40 m drop, **shoot a two-handed bow with a 2× scope and a laser sight** at
 targets floating (and flying) out over the clouds, **take the helm of a flying boat** to sail between the islands,
-and **fire signal flares** that hang under parachutes and light up the night.
+**fire signal flares** that hang under parachutes and light up the night, **walk through a see-through portal** to
+an island 100 m away, and **paraglide** home from it, circling in thermals.
 
 WebXR + three.js + Rapier, TypeScript, Vite. No assets: geometry, textures and sound are all generated in code.
 See [DECISIONS.md](DECISIONS.md) for why each piece was chosen.
@@ -79,6 +80,12 @@ The page switches to the **low** quality preset automatically when it detects a 
 | ![A white parachute flare over the island at night](docs/flares-night.jpg) | ![A red parachute flare: the island in red light, trees throwing shadows](docs/flares-red.jpg) |
 | ![Three smoke rounds at sunset: trails, bursts and drifting colour columns](docs/flares-smoke.jpg) | ![Loading the flare pistol: broken open, a red parachute cartridge going in](docs/flare-gun.jpg) |
 
+| | |
+|---|---|
+| ![The portal on the main island: the perch, 100 m away, seen through it](docs/portal-home.jpg) | ![On the perch, looking back at its portal: the main island through it](docs/portal-perch.jpg) |
+| ![The glider rack at the root of the plank, its windsock showing the breeze](docs/glider-rack.jpg) | ![Wearing the wing at the end of the plank, a toggle in each hand](docs/glider-plank.jpg) |
+| ![Banking left over the cloud sea](docs/glider.jpg) | ![From the harness: the canopy banked overhead, birds circling in a thermal](docs/glider-pilot.jpg) |
+
 (Rendered from the emulated headset with `__vr.snapshot()`.)
 
 ## Controls
@@ -99,6 +106,8 @@ The page switches to the **low** quality preset automatically when it detects a 
 | **Skyboat lift** (blue handle, left of the wheel): grip, pull up or push down | Climb / sink. Let go and it springs back, holding your altitude |
 | **Flare pistol**: grip it in its case, then **A / X** | Breaks it open (a fired case flies out). A / X again, or a quick upward flick of the wrist, snaps it shut |
 | **Cartridge** (grip one in the case) brought to the open breech | It slides in. Close the pistol and pull the **trigger**: one shot, then reload |
+| **Paraglider**: grip a toggle on a glider rack (one in each hand) | The wing rises over you. Walk off an edge to fly; pull a toggle down to turn that way, both to slow |
+| **Walk through a portal** (in the room or with the stick), or **teleport into its opening** | You come out of its twin on the other island, facing out of it |
 | **Turn your left palm toward your face** | Wrist menu: poke it with your right index finger (lift it off the trigger to point) or point and pull the trigger |
 
 ### Things to try
@@ -117,6 +126,9 @@ The page switches to the **low** quality preset automatically when it detects a 
 - **The skyboat** (the pier on the east rim, to your right from spawn): see below.
 - **Signal flares**: a flare locker stands by the way out to the pier, and another is on the skyboat's deck.
   See below.
+- **The portal**: turn around from where you start; it's behind you to the left. Its twin is on the perch, a high
+  island 100 m out. See below.
+- **Paraglider**: a rack stands at the root of the plank, and another on the perch. See below.
 
 ### Sky Range (archery)
 Take the bow from its rack. Either hand can hold it; that hand aims. Bring your other hand to the string,
@@ -177,6 +189,41 @@ Cartridges you take are replaced a couple of seconds later.
 - Let go of the pistol at its case and it goes back in. Fired from the skyboat, flares keep the boat's speed.
 - RESET on the console puts the pistols away and clears the sky.
 
+### Portals
+A stone hoop on a plinth, south-west of spawn. Look into it and you see the **perch**: a high island 100 m
+north-west and 22 m up, live, in stereo, from wherever you stand. Walk through, in the room or with the stick, and
+you're there, facing out the way you were walking, with no fade. Or aim a teleport arc into the opening: it carries
+on out of the perch's portal (you see it land through the portal) and the blink takes you there, facing out of it.
+The perch's portal looks back at the main island the same way. Throw a ball through, shoot an arrow or a flare
+through: they come out of the other one, still flying. The hoop itself is solid stone. From far away (over 45 m) a
+portal just shows a slow swirl.
+
+### Paraglider
+Each rack holds a wing: orange and teal at the root of the plank, violet and yellow on the perch's rim (step
+through the portal, then glide home).
+
+- **Take off**: grip a toggle on the rack in each hand. The wing rises from behind you to over your head. Walk off
+  an edge (the end of the plank is made for it). Wearing the wing, the stick walks you off edges too.
+- **Steer**: hands at shoulder height fly straight at full speed (6 m/s, an easy pace). Pull the **left toggle down
+  to turn left**, the right one to turn right; it answers straight away, and the further down, the tighter the turn
+  (a full turn takes about 6 s). **Both down** (to about your belly) slows you to 3.6 m/s and you come down steeply,
+  which is how you get down onto a small island. Let go of a toggle and it springs up beside your head; grab it
+  again any time.
+- **Climb in a thermal**: ten **thermals** rise around the map, by the satellite island, the west isle, south and
+  east of the main island, halfway to the perch, beside the perch, and by each far island. Look for faint streaks
+  winding up a column of air, dust spiralling up and birds circling at the top, and listen for the variometer: it
+  beeps faster and higher the faster you climb. Circle inside one (one toggle well down) to climb to 35-50 m.
+- **Ride a ridge**: the breeze blows from the west-north-west, and every island pushes it up over its windward rim.
+  Fly back and forth just off an island's west and north sides to stay up (you'll see dust carried up over the
+  rim). The plank is in that lift, so launching from it is gentle. Without lift you sink about 0.75 m/s, about 8 m
+  forward per metre down.
+- **Land** on any island (or the skyboat's deck): you touch down when your feet reach the ground and run a few steps.
+  Come in from the lee (east and south) side, where the air isn't rising. You're still wearing the wing, so walk
+  off another edge to fly again. **Let go of both toggles** on the ground and the wing packs itself back onto its
+  rack.
+- Fly into a cliff or a tree and you slide along it. Sink into the clouds and you're blinked back to the rack.
+- Teleporting, Recenter or RESET also send the wing back to its rack.
+
 ### Wrist menu
 **Settings**: turning (snap 45° / snap 30° / smooth), left stick (walk / teleport), vignette, quality, music,
 fingers (driven by controller touch, or by measured joints if SteamVR provides them), bow laser, plus Recenter ·
@@ -210,6 +257,12 @@ first session, check these and note anything that's off:
 - [ ] **Flares**: the pistol sits right in the hand and points where you point; A / X opens it, the cartridge goes
       in easily, the flick to close works for you. At night, does a white parachute flare light things up the
       way you hoped (not too dim, not daylight)? Does the frame rate hold with two or three in the air?
+- [ ] **Portals**: does the view through look like a window (depth, both eyes agreeing) rather than a screen?
+      Stepping through: seamless, and comfortable? Does the frame rate hold when the portal fills your view?
+- [ ] **Paraglider**: are the toggles easy to take off the rack and to find again after letting go? Do the brake
+      heights suit you (hands at shoulder height = no brake, belly = full)? Is the new pace right, and does it
+      answer quickly enough? Is turning comfortable? Can you see the thermals and ridges, climb in them, and land on
+      the main island coming home from the perch?
 
 ---
 
@@ -219,7 +272,7 @@ first session, check these and note anything that's off:
 |---|---|
 | `/?emulate` | An emulated headset ([IWER](https://github.com/meta-quest/immersive-web-emulation-runtime), shaped like the Frame as Chrome sees it). Press Enter VR in any browser |
 | `/?emulate&devui` | The same, plus IWER's DevUI to drive the head and controllers with mouse and keyboard |
-| `/?emulate&selftest` | Runs the **37-check scripted playtest** and logs one JSON line per check (`[selftest] {...}`). Results are also in `window.__selftest` |
+| `/?emulate&selftest` | Runs the **49-check scripted playtest** and logs one JSON line per check (`[selftest] {...}`). Results are also in `window.__selftest` |
 | `/?emulate&selftest=teleport,gravity-gloves` | Only those checks |
 | `/?emulate&autostart` | Enters the emulated session on load |
 
@@ -270,6 +323,8 @@ src/
   archery/           bow (two-handed draw), scope (picture-in-picture lens shader), laser sight, arrows, Sky Range targets
   skyboat/           the flying boat: hull/helm model, pier, flight + collisions + carrying the player
   flares/            flare pistols, cartridges, lockers, flights (parachute/star/smoke), smoke, the light pool
+  portals/           the see-through portal pair: per-eye views, walking through, things flying through
+  glider/            paraglider: wing model, racks, flight, thermals and ridge lift (and the streaks, dust and birds that show them)
   world/             sky, time of day, clouds, islands, scenery, fireflies, play area, layout
   audio/             Web Audio engine, synthesized SFX, ambience + generative pad
   fx/particles.ts    one-draw-call particle system
@@ -280,21 +335,29 @@ tools/contact-sheet.py
 
 ## Status
 
-**Verified** (Chromium in an emulated headset, dev server and production build): all 37 self-test checks pass,
+**Verified** (Chromium in an emulated headset, dev server and production build): all 49 self-test checks pass,
 there are no frame errors, and the visuals were reviewed from snapshots of every station, the hands in four poses
 (both sides), sunset and night, fireworks, the teleport arc, the bow at rest and at full draw, the scope from
 aligned and off-axis eye positions, the laser at sunset and night, and the skyboat at the pier, from the helm and
 in flight. The archery checks include a ballistic one: with the red dot on a point 35 m away, the arrow lands
-within 5 cm of it. The skyboat checks fly her with the throttle, wheel and lift handle driven by the emulated
-hands and measure that the player doesn't slide on the deck (0 mm), that she stops at a cliff (3 cm gap), and
-that teleporting onto her while she moves lands within 3 cm of the aimed spot. The flare checks reload the
-pistol with the emulated hands (open, cartridge in, flick shut, one shot, dry click, fired case out, back in its
-case), fire from the moving boat, and measure that a white parachute flare at night more than doubles the
-brightness of a view of the island. Also checked: the HTTPS mode serves correctly.
+within 5 cm of it. The skyboat checks fly her with the throttle, wheel and lift handle driven by the emulated hands
+and measure that the player doesn't slide on the deck (0 mm), that she stops at a cliff (3 cm gap), and that
+teleporting onto her while she moves lands within 3 cm of the aimed spot. The flare checks reload the pistol with
+the emulated hands (open, cartridge in, flick shut, one shot, dry click, fired case out, back in its case), fire
+from the moving boat, and measure that a white parachute flare at night more than doubles the brightness of a view
+of the island. The portal checks walk the emulated head through the opening (one transit, out 1.5 m in front of the
+twin, facing straight out of it), walk through with the stick, teleport through with an arc aimed into the opening
+(landing on the perch, turned to face out of its portal), check that both eyes get a fresh view every frame and
+none while you look away, and send a ball and an arrow through. Snapshots taken just before and just after stepping
+through show the same picture, shadows included. The glider checks take the toggles off the rack with the emulated
+hands, walk off the end of the plank with the stick, turn each way by pulling a toggle (80° and 90° in 1.5 s), slow
+to 3.6 m/s with both, climb 10 m in 8 s circling in a thermal, climb 2 m in 2 s along the main island's windward
+rim, touch down on the main island, pack the wing away by letting go, and get rescued from the clouds back to the
+perch rack. Also checked: the HTTPS mode serves correctly.
 
 **Tested by you on a Steam Frame** (PC streaming): the first version, then the Sky Range (you reported the
-thumbs and the target z-fighting; both fixed). The laser, the skyboat and the flares are new and untested on
-hardware.
+thumbs and the target z-fighting; both fixed). The laser, the skyboat, the flares, the portals and the
+paraglider are new and untested on hardware.
 
 **Not verified:** anything on real hardware, meaning a real SteamVR + Chrome session, the Frame's actual
 haptics/touch/joint reporting, the standalone community browser, comfort and feel. That's the checklist above.

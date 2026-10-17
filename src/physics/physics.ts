@@ -61,6 +61,8 @@ export interface StaticInfo {
   onHit?(prop: Prop, strength: number): void;
   /** The collider rides on this moving object (the skyboat): convert hit points into its frame. */
   platform?: Object3D;
+  /** Thin things you step through or over (the portal's hoop): checks for the ground under your feet ignore them. */
+  stepOver?: boolean;
 }
 
 export interface PropOptions {
@@ -98,6 +100,8 @@ export class Physics {
    * drawn one step behind, so kinematic platforms lead by that much to line up.
    */
   beforeStep: ((dt: number, ahead: number) => void) | null = null;
+  /** Callback run after each fixed step (props crossing portals). */
+  afterStep: (() => void) | null = null;
   /** Called when a prop falls out of the world and respawns. */
   onRespawn: ((p: Prop) => void) | null = null;
 
@@ -123,7 +127,7 @@ export class Physics {
     desc.setCollisionGroups(GROUP_STATIC);
     if (info.onHit) desc.setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS).setContactForceEventThreshold(0.5);
     const c = this.world.createCollider(desc, parent);
-    this.staticInfo.set(c.handle, { walkable: info.walkable ?? false, material: info.material ?? 'stone', onHit: info.onHit, platform: info.platform });
+    this.staticInfo.set(c.handle, { walkable: info.walkable ?? false, material: info.material ?? 'stone', onHit: info.onHit, platform: info.platform, stepOver: info.stepOver });
     return c;
   }
 
@@ -201,6 +205,7 @@ export class Physics {
         p.currPos.set(t.x, t.y, t.z);
         p.currQuat.set(r.x, r.y, r.z, r.w);
       }
+      this.afterStep?.();
       this.accumulator -= PHYSICS_DT;
       n++;
       this.steps++;
@@ -305,10 +310,19 @@ export class Physics {
   /** World geometry (static or riding a moving platform), as opposed to props and hands. */
   readonly isWorld = (c: RAPIER.Collider): boolean => this.staticInfo.has(c.handle);
 
-  /** Cast a ray against world geometry (islands, decks, the moving skyboat…). */
-  castWalkable(origin: Vector3, dir: Vector3, maxDist: number): { point: Vector3; normal: Vector3; dist: number; walkable: boolean; collider: number; platform: Object3D | null } | null {
+  /** World geometry that counts as ground under your feet (not the things you'd step over). */
+  private readonly isGround = (c: RAPIER.Collider): boolean => {
+    const info = this.staticInfo.get(c.handle);
+    return !!info && !info.stepOver;
+  };
+
+  /**
+   * Cast a ray against world geometry (islands, decks, the moving skyboat…). With `underfoot`
+   * it's a check for the ground under you, which ignores things you'd step over.
+   */
+  castWalkable(origin: Vector3, dir: Vector3, maxDist: number, underfoot = false): { point: Vector3; normal: Vector3; dist: number; walkable: boolean; collider: number; platform: Object3D | null } | null {
     const ray = new RAPIER.Ray(origin, dir);
-    const hit = this.world.castRayAndGetNormal(ray, maxDist, true, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC, undefined, undefined, undefined, this.isWorld);
+    const hit = this.world.castRayAndGetNormal(ray, maxDist, true, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC, undefined, undefined, undefined, underfoot ? this.isGround : this.isWorld);
     if (!hit) return null;
     const info = this.staticInfo.get(hit.collider.handle);
     const point = _v.copy(dir).multiplyScalar(hit.timeOfImpact).add(origin).clone();

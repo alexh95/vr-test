@@ -19,13 +19,13 @@ import {
 import { bus } from '../core/events';
 import { clamp } from '../core/math';
 import { chutePop, flareHiss, smokePop, type LoopSound } from '../audio/sfx';
+import { WIND } from '../world/wind';
 import type { ShellKind } from './kinds';
 import type { LightEmitter } from './lights';
 import type { SmokeSystem } from './smoke';
 import type { App } from '../app';
 
-/** A steady breeze: parachutes and smoke drift with it (east-south-east). */
-export const WIND = new Vector3(1.0, 0, 0.55);
+export { WIND };
 
 type Phase = 'flight' | 'chute' | 'ground' | 'spent';
 
@@ -269,6 +269,18 @@ export class Flights {
     if (f.kind.type === 'star' && f.phase === 'flight') {
       const rh = this.app.range.raycast(f.pos, _v.copy(f.pos).add(_seg));
       if (rh?.kind === 'balloon') this.app.range.pop(rh.balloon!, rh.point.distanceTo(this.app.headPosition(_head)));
+    }
+    // Through a portal: out of its twin, still flying.
+    if (f.phase === 'flight') {
+      const end = _v.copy(f.pos).add(_seg);
+      const crossing = this.app.portals.through(f.pos, end);
+      if (crossing) {
+        f.pos.copy(end).applyMatrix4(crossing.m);
+        f.vel.applyQuaternion(crossing.q);
+        f.trailAcc = 0;
+        bus.emit('portal-transit', { what: `flare-${f.kind.id}`, to: crossing.portal.partner.id });
+        return;
+      }
     }
     const hit = f.age > 0.06 ? this.app.physics.castWalkable(from, _n.copy(_seg).multiplyScalar(1 / len), len) : null;
     if (!hit) {

@@ -130,6 +130,7 @@ export function createDriver(app: App, emu: Emu) {
     /** Everything back to the start: spawn point, normal size, gravity on, toys home. */
     async resetWorld() {
       d.releaseButtons();
+      app.glider.stow('reset');
       await d.frames(2);
       app.grab.releaseAll();
       if (app.giant) app.setGiant(false);

@@ -18,7 +18,29 @@ export const LAYOUT = {
   dock: new Vector3(7.2, 0, 0.9),
   /** The signal-flare locker, beside the way out to the pier. */
   flares: new Vector3(5.95, 0, 2.6),
+  /** The home portal, south-west of spawn, facing it. */
+  portal: new Vector3(-3.4, 0, 5.0),
+  /** The glider rack at the root of the plank. */
+  glider: new Vector3(0.95, 0, -7.25),
 };
+
+/**
+ * The perch: a high far island (far-7 in scenery.ts), 100 m out and 22 m up. The
+ * twin portal stands just behind its centre, facing the main island, and a glider
+ * rack waits at its rim: step through, and glide home.
+ */
+export const PERCH = new Vector3(-30, 22, -95);
+const towardMain = new Vector3(-PERCH.x, 0, -PERCH.z).normalize();
+/** Facing (rotation about +Y) that points a +Z front at the main island. */
+export const PERCH_FACING = Math.atan2(towardMain.x, towardMain.z);
+export const PERCH_PORTAL = PERCH.clone().addScaledVector(towardMain, -1.4);
+/** The perch's glider rack: toward the rim, a step to the side of the way from the portal. */
+export const PERCH_RACK = PERCH.clone().addScaledVector(towardMain, 3.4).addScaledVector(new Vector3(towardMain.z, 0, -towardMain.x), 1.4);
+
+/** True near the perch's portal or rack: keep trees off them. */
+export function nearPerchFeature(x: number, z: number): boolean {
+  return Math.hypot(x - PERCH_PORTAL.x, z - PERCH_PORTAL.z) < 3.8 || Math.hypot(x - PERCH_RACK.x, z - PERCH_RACK.z) < 3.4;
+}
 
 /**
  * The pier runs east off the rim; the skyboat moors across its end, bow to the
